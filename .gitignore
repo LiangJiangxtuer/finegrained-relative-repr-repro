@@ -1,0 +1,16 @@
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+*.egg-info/
+
+# Large/generated artifacts
+outputs/
+data/tokens/
+data/datasets/
+*.pt
+*.pth
+
+# Reference checkout and extracted paper text are kept for local inspection, not vendored
+external/bridge-anchors/
+docs/paper_text.txt

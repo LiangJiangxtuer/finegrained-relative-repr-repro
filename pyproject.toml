@@ -1,0 +1,22 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "pal-finegrained-repro"
+version = "0.1.0"
+description = "Strict PAL reproduction for fine-grained relative multimodal alignment"
+requires-python = ">=3.10"
+dependencies = [
+  "torch",
+  "torchvision",
+  "numpy",
+  "pyyaml",
+  "pillow",
+  "tqdm",
+  "transformers>=4.40,<5",
+  "scikit-learn",
+]
+
+[tool.setuptools.packages.find]
+where = ["src"]

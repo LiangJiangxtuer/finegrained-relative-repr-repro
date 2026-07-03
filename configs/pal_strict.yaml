@@ -1,0 +1,75 @@
+paper:
+  title: Learning Relative Representations for Fine-Grained Multimodal Alignment with Limited Data
+  method: Projection-Free Anchor Learning (PAL)
+  source_pdf: /home/hnxxzy/Downloads/Learning Relative Representations for Fine-Grained.pdf
+
+model:
+  name: pal_strict
+  vision_encoder: facebook/dinov2-large
+  text_encoder: roberta-large
+  num_anchors: 512
+  pool_temperature: 0.03
+
+training:
+  contrastive_temperature: 0.07
+  batch_size: 256
+  epochs: 20
+  lr: 1.0e-3
+  weight_decay: 1.0e-4
+  seed: 42
+  device: auto
+  num_workers: 0
+  output_dir: outputs/pal_strict_full
+
+data:
+  coco2014_raw_dir: /home/hnxxzy/projects/DeepScientist/quests/pal-relative-rep-repro/tmp/datasets/coco2014/raw
+  token_dir: data/tokens/coco2014_full
+  train_size: null
+  train_fraction: 0.95
+
+evaluation_contract:
+  classification_top1:
+    - STL10
+    - CIFAR100
+    - Caltech101
+    - DTD
+    - EuroSAT
+  retrieval_r1:
+    - Flickr30k I2T/T2I
+    - COCO I2T/T2I
+  segmentation_miou_fg:
+    - VOC20
+    - Context
+    - ADE20K
+
+presets:
+  smoke:
+    model:
+      num_anchors: 64
+      pool_temperature: 0.03
+    training:
+      batch_size: 32
+      epochs: 2
+      lr: 1.0e-3
+      weight_decay: 1.0e-4
+      seed: 42
+      device: auto
+      output_dir: outputs/local_smoke
+    data:
+      token_dir: /home/hnxxzy/projects/DeepScientist/quests/pal-relative-rep-repro/artifacts/runs/pal_scoped_coco_retrieval_pilot_128x64/tokens
+      train_size: 128
+      train_fraction: 0.8
+  cpu_tiny:
+    model:
+      num_anchors: 16
+      pool_temperature: 0.03
+    training:
+      batch_size: 8
+      epochs: 1
+      lr: 1.0e-3
+      seed: 42
+      device: cpu
+      output_dir: outputs/cpu_tiny
+    data:
+      token_dir: /home/hnxxzy/projects/DeepScientist/quests/pal-relative-rep-repro/artifacts/runs/pal_bounded_coco_smoke/tokens
+      train_size: 3

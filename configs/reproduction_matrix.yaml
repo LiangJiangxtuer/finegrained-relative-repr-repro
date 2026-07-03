@@ -1,0 +1,83 @@
+paper:
+  title: Learning Relative Representations for Fine-Grained Multimodal Alignment with Limited Data
+  method: PAL
+  encoders:
+    vision: facebook/dinov2-large
+    text: roberta-large
+  default:
+    train_data: MSCOCO2014 train first-caption pairs
+    train_pairs: 82783
+    num_anchors: 512
+    pool_temperature: 0.03
+    contrastive_temperature: 0.07
+
+experiments:
+  main_pal_k512:
+    description: Main Table 2/3 PAL run with K=512 and CAP tau_p=0.03.
+    train_split: coco2014_train_first_caption
+    eval:
+      classification: [STL10, CIFAR100, Caltech101, DTD, EuroSAT]
+      retrieval: [Flickr30k, COCO]
+      segmentation: [VOC20, Context, ADE20K]
+    target:
+      classification_top1:
+        STL10: 95.3
+        CIFAR100: 48.8
+        Caltech101: 60.9
+        DTD: 17.7
+        EuroSAT: 34.6
+      retrieval_r1:
+        Flickr30k:
+          i2t: 76.3
+          t2i: 61.8
+        COCO:
+          i2t: 56.3
+          t2i: 42.6
+      segmentation_miou_fg:
+        VOC20: 32.3
+        Context: 25.5
+        ADE20K: 13.8
+
+ablations:
+  token_usage_cap:
+    metric_groups: [avg_cls, avg_ret, avg_seg]
+    variants:
+      global_only:
+        description: Global pooled/CLS representation only.
+        target: {avg_cls: 48.4, avg_ret: 43.9, avg_seg: 7.3}
+      full_tokens_mean:
+        description: Full tokens with uniform/mean token pooling.
+        target: {avg_cls: 49.3, avg_ret: 48.4, avg_seg: 16.3}
+      full_tokens_cap:
+        description: Full tokens with Cross-Attention Pooling.
+        target: {avg_cls: 51.5, avg_ret: 59.3, avg_seg: 23.9}
+  anchor_count:
+    values: [32, 64, 128, 256, 512]
+    target_source: Figure 4, qualitative curve; exact numeric points not printed in PDF text.
+  data_scaling:
+    variants:
+      coco80k:
+        target: {avg_cls: 51.5, avg_ret: 59.3, avg_seg: 23.9}
+      coco80k_plus_coco2017_30k:
+        target: {avg_cls: 53.0, avg_ret: 61.9, avg_seg: 25.5}
+  pool_temperature:
+    values:
+      0.02: {avg_cls: 51.1, avg_ret: 58.8, avg_seg: 21.6}
+      0.03: {avg_cls: 51.5, avg_ret: 59.3, avg_seg: 23.9}
+      0.05: {avg_cls: 50.4, avg_ret: 57.9, avg_seg: 23.2}
+      0.07: {avg_cls: 50.2, avg_ret: 55.5, avg_seg: 21.0}
+      0.1: {avg_cls: 49.7, avg_ret: 52.9, avg_seg: 18.5}
+
+analyses:
+  anchor_overlap:
+    top_k_anchors: 5
+    metrics: [hard_overlap, dice]
+    targets:
+      Flickr30k:
+        hard_overlap: {matched: 0.226, mismatched: 0.059}
+        dice: {matched: 0.212, mismatched: 0.050}
+      COCO:
+        hard_overlap: {matched: 0.218, mismatched: 0.028}
+        dice: {matched: 0.211, mismatched: 0.024}
+  qualitative_anchor_attention:
+    description: Visualize per-anchor CAP attention heatmaps and caption words with attention > 0.5.

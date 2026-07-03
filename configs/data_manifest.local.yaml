@@ -1,0 +1,41 @@
+version: 1
+notes: Local dataset manifest for paper-grade PAL reproduction. Feature/token tensors may be absent until extraction scripts complete.
+
+paths:
+  coco2014_root: /home/hnxxzy/projects/DeepScientist/quests/pal-relative-rep-repro/tmp/datasets/coco2014/raw
+  coco2014_train_images: /home/hnxxzy/projects/DeepScientist/quests/pal-relative-rep-repro/tmp/datasets/coco2014/raw/train2014
+  coco2014_val_images: /home/hnxxzy/projects/DeepScientist/quests/pal-relative-rep-repro/tmp/datasets/coco2014/raw/val2014
+  coco2014_train_captions: /home/hnxxzy/projects/DeepScientist/quests/pal-relative-rep-repro/tmp/datasets/coco2014/raw/annotations/captions_train2014.json
+  coco2014_val_captions: /home/hnxxzy/projects/DeepScientist/quests/pal-relative-rep-repro/tmp/datasets/coco2014/raw/annotations/captions_val2014.json
+  flickr30k_root: /home/hnxxzy/Downloads/Flickr30k.zip
+  classification_roots:
+    STL10: /home/hnxxzy/projects/DeepScientist/quests/pal-relative-rep-repro/tmp/datasets/pal_public/classification/stl10
+    CIFAR100: /home/hnxxzy/projects/DeepScientist/quests/pal-relative-rep-repro/tmp/datasets/pal_public/classification/cifar100
+    Caltech101: /home/hnxxzy/projects/DeepScientist/quests/pal-relative-rep-repro/tmp/datasets/pal_public/classification/caltech101
+    DTD: /home/hnxxzy/projects/DeepScientist/quests/pal-relative-rep-repro/tmp/datasets/pal_public/classification/dtd
+    EuroSAT: /home/hnxxzy/projects/DeepScientist/quests/pal-relative-rep-repro/tmp/datasets/pal_public/classification/eurosat
+  segmentation_roots:
+    VOC20: /home/hnxxzy/projects/DeepScientist/quests/pal-relative-rep-repro/tmp/datasets/pal_public/segmentation/voc2012
+    Context: /home/hnxxzy/projects/DeepScientist/quests/pal-relative-rep-repro/tmp/datasets/pal_public/segmentation/pascal_context/raw
+    ADE20K: /home/hnxxzy/projects/DeepScientist/quests/pal-relative-rep-repro/tmp/datasets/pal_public/segmentation/ade20k/raw/ADEChallengeData2016
+
+splits:
+  coco2014_train_pairs_manifest: /home/hnxxzy/projects/DeepScientist/quests/pal-relative-rep-repro/artifacts/runs/pal_coco2014_data/coco_train2014_first_caption_pairs.jsonl
+  coco2014_train_pair_count_actual: 82783
+  coco2014_train_pair_count_paper_approx: 80000
+  flickr30k_eval_manifest: /home/hnxxzy/finegrained-relative-repr-repro/data/tokens/flickr30k_1k_multicaption/pairs.jsonl
+
+encoder_cache:
+  coco2014_full_tokens: /home/hnxxzy/finegrained-relative-repr-repro/data/tokens/coco2014_full
+  coco2014_val_5k_multicaption_tokens: /home/hnxxzy/finegrained-relative-repr-repro/data/tokens/coco2014_val_5k_multicaption
+  flickr30k_1k_multicaption_tokens: /home/hnxxzy/finegrained-relative-repr-repro/data/tokens/flickr30k_1k_multicaption
+  smoke_tokens: /home/hnxxzy/projects/DeepScientist/quests/pal-relative-rep-repro/artifacts/runs/pal_scoped_coco_retrieval_pilot_128x64/tokens
+
+readiness:
+  coco2014_images: true
+  coco2014_captions: true
+  public_classification_data: true
+  public_segmentation_data: true
+  flickr30k: true
+  full_coco_tokens: true
+  downstream_eval_tokens: true
