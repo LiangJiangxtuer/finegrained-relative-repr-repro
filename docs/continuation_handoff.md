@@ -88,36 +88,36 @@ Always set `PYTHONPATH=src` for module commands.
    - output: `outputs/pal_k512_coco2014_full/voc20_segmentation_full.json`
    - samples: `1449`
    - foreground mIoU: `14.82` vs paper `32.30`
-17. Tests currently pass:
+17. Context/ADE20K full segmentation completed:
+   - Context output: `outputs/pal_k512_coco2014_full/context_segmentation_full.json`, mIoU `0.53` vs paper `25.50`
+   - ADE20K output: `outputs/pal_k512_coco2014_full/ade20k_segmentation_full.json`, mIoU `1.47` vs paper `13.80`
+18. K / `tau_p` / token-usage training sweeps completed:
+   - K loss: `0.509355 -> 0.283415` from K32 to K512
+   - tau loss: `0.252805 / 0.283415 / 0.335997 / 0.371047 / 0.407706` for `0.02 / 0.03 / 0.05 / 0.07 / 0.10`
+   - token usage loss: global `0.740161`, mean `0.501132`, cap `0.283415`
+19. Anchor overlap completed:
+   - output: `outputs/analysis/coco_karpathy_anchor_overlap.json`
+   - matched `0.517633` vs mismatched `0.436705`
+20. Full pipeline result summary written:
+   - `docs/pipeline_results_snapshot.md`
+21. Tests currently pass:
    - command: `PYTHONPATH=src /home/hnxxzy/miniconda3/envs/ovvs/bin/python -m unittest discover -s tests -v`
    - result: `Ran 42 tests ... OK`
 
 ## Current active long-running process
 
-The downstream segmentation/ablation pipeline is running:
-
-```text
-process id: proc_fd7c67b922d5
-current stage: Pascal Context segmentation, processed at least 168/10103 at last poll
-started by: scripts/run_reproduction_pipeline.py --run --skip-existing --start-at voc20_full_segmentation
-```
+No active Hermes-managed background process at this handoff point. `proc_fd7c67b922d5` completed normally.
 
 ## Next commands
 
-Monitor the running downstream pipeline:
-
-```bash
-hermes process poll proc_fd7c67b922d5
-```
-
-It should continue Context -> ADE20K -> K sweep -> tau sweep -> token-usage ablation -> anchor overlap -> baseline tracking, skipping outputs that already exist.
+Next useful commands are documentation/commit checks and optional downstream ablation evaluation. The existing K/tau/token checkpoints have only training-loss metrics; run retrieval/classification/segmentation evaluations per checkpoint before claiming paper ablation-table parity.
 
 ## Known gaps for paper-level parity
 
 1. COCO/Flickr30k Karpathy retrieval split alignment is complete.
 2. Prompt sweep is complete; mixed best templates improve classification average top1 to `46.09`, but do not close the full paper gap.
-3. VOC20 full-val is complete; Context is running and ADE20K is queued.
-4. Ablations for anchor count, CAP temperature, and token usage remain to run.
+3. VOC20/Context/ADE20K full segmentation runs are complete but far below paper, especially Context/ADE20K; dense protocol debugging remains.
+4. Ablation training runs are complete, but downstream ablation metrics remain to run.
 
 ## Important caveat
 

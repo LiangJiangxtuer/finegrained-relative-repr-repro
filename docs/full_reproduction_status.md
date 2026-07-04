@@ -205,17 +205,28 @@ gap: -5.37, relative: 89.56%
 best templates: STL10 close-up, CIFAR100 default photo, Caltech101 close-up, DTD cropped, EuroSAT close-up
 ```
 
-VOC20 full-val segmentation has completed:
+VOC20/Context/ADE20K full segmentation has completed:
 
 ```text
-output: outputs/pal_k512_coco2014_full/voc20_segmentation_full.json
-samples: 1449
-foreground mIoU: 14.82 vs paper 32.30
-gap: -17.48, relative: 45.89%
+VOC20 output: outputs/pal_k512_coco2014_full/voc20_segmentation_full.json
+VOC20 samples/mIoU: 1449 / 14.82 vs paper 32.30
+Context output: outputs/pal_k512_coco2014_full/context_segmentation_full.json
+Context samples/mIoU: 10103 / 0.53 vs paper 25.50
+ADE20K output: outputs/pal_k512_coco2014_full/ade20k_segmentation_full.json
+ADE20K samples/mIoU: 2000 / 1.47 vs paper 13.80
+Average mIoU: 5.61 vs paper 23.87, relative 23.50%
 ```
 
-The downstream pipeline process `proc_fd7c67b922d5` is currently running Pascal Context segmentation (`10103` samples), followed by ADE20K, K/tau/token-usage ablations, anchor overlap, and baseline tracking.
+The downstream pipeline process `proc_fd7c67b922d5` completed normally. It also completed training-only K, `tau_p`, and token-usage sweeps plus anchor-overlap analysis:
 
+```text
+K final train loss: K32 0.509355 / K64 0.403373 / K128 0.338583 / K256 0.303722 / K512 0.283415
+tau_p final train loss: 0.02 0.252805 / 0.03 0.283415 / 0.05 0.335997 / 0.07 0.371047 / 0.10 0.407706
+token usage final train loss: global 0.740161 / mean 0.501132 / cap 0.283415
+anchor overlap: matched 0.517633 vs mismatched 0.436705
+```
+
+Full pipeline summary: `docs/pipeline_results_snapshot.md`.
 Flickr30k local 1K multi-caption retrieval has also been evaluated from `/home/hnxxzy/Downloads/Flickr30k.zip`:
 
 ```text
@@ -243,8 +254,8 @@ Full machine-readable results are summarized in `docs/results_snapshot.md`.
 
 ## Remaining for paper-grade result parity
 
-- Finish the currently running Pascal Context/ADE20K segmentation jobs.
+- Run downstream retrieval/classification/segmentation metrics for the K, `tau_p`, and token-usage ablation checkpoints; current sweep outputs are training-loss-only.
 - If desired, expand the CKA proxy sweep into full layer-specific token extraction/training/evaluation.
-- Run remaining K/tau/token-usage ablations after segmentation.
+- Debug dense segmentation protocol, especially Context/ADE20K, which are now runnable but far below paper.
 - Produce anchor-overlap and qualitative attention visualizations.
 - Implement/run baseline methods if reproducing every comparison row, not just PAL target rows.

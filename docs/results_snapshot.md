@@ -66,12 +66,62 @@ Classification outputs:
 | Dataset | Split | Samples | Local mIoU | Paper mIoU | Gap | Relative | Notes |
 |---|---|---:|---:|---:|---:|---:|---|
 | VOC20 | val | 1,449 | 14.82 | 32.30 | -17.48 | 45.89% | First full-val run; substantially better than smoke but still below paper. |
-| Context | trainval | 10,103 | running | 25.50 | - | - | Full evaluation is running in `proc_fd7c67b922d5`. |
-| ADE20K | validation | - | pending | 13.80 | - | - | Queued after Context in the same pipeline. |
+| Context | trainval | 10,103 | 0.53 | 25.50 | -24.97 | 2.09% | Full evaluation complete; likely protocol/debug gap. |
+| ADE20K | validation | 2,000 | 1.47 | 13.80 | -12.33 | 10.67% | Full evaluation complete; likely protocol/debug gap. |
+| Average | - | - | 5.61 | 23.87 | -18.26 | 23.50% | Average over VOC20/Context/ADE20K. |
 
 Segmentation outputs:
 
 - `outputs/pal_k512_coco2014_full/voc20_segmentation_full.json`
+- `outputs/pal_k512_coco2014_full/context_segmentation_full.json`
+- `outputs/pal_k512_coco2014_full/ade20k_segmentation_full.json`
+
+## Completed pipeline sweeps and analyses
+
+The ordered pipeline completed training-only sweep jobs for K, `tau_p`, and token-usage ablations. These are not paper ablation-table metrics yet; they record convergence and checkpoints that still need downstream evaluation.
+
+### K sweep final train loss
+
+| K | Final train loss |
+|---:|---:|
+| 32 | 0.509355 |
+| 64 | 0.403373 |
+| 128 | 0.338583 |
+| 256 | 0.303722 |
+| 512 | 0.283415 |
+
+### `tau_p` sweep final train loss
+
+| `tau_p` | Final train loss |
+|---:|---:|
+| 0.02 | 0.252805 |
+| 0.03 | 0.283415 |
+| 0.05 | 0.335997 |
+| 0.07 | 0.371047 |
+| 0.10 | 0.407706 |
+
+### Token usage ablation final train loss
+
+| Mode | Final train loss |
+|---|---:|
+| global | 0.740161 |
+| mean | 0.501132 |
+| cap | 0.283415 |
+
+### Anchor overlap
+
+| Metric | Value |
+|---|---:|
+| matched hard overlap | 0.517633 |
+| matched Dice | 0.517633 |
+| mismatched hard overlap | 0.436705 |
+| mismatched Dice | 0.436705 |
+
+Matched overlap is `+0.080928` absolute / `+18.53%` relative above mismatched overlap.
+
+Full pipeline summary:
+
+- `docs/pipeline_results_snapshot.md`
 
 ## Verification
 
@@ -93,4 +143,4 @@ OK
 - The implementation uses final DINOv2-L/RoBERTa-L hidden tokens. The paper mentions CKA-based layer selection but the exact layer indices were not recovered from the PDF text.
 - COCO and Flickr30k Karpathy test extraction/evaluation are complete. Both are now the preferred retrieval rows for paper-protocol comparison; the older seed-42 subset rows are retained only as historical proxies.
 - Prompt-template sweep improved classification average top-1 from 44.69 to 46.09; remaining gap suggests prompt choice is only a partial explanation.
-- VOC20 full-val segmentation is complete; Context/ADE20K and ablation experiments remain incomplete/running.
+- VOC20/Context/ADE20K full segmentation runs are complete, but segmentation remains far below paper and needs protocol debugging. K/`tau_p`/token-usage sweep training is complete; downstream ablation metrics remain to be run.

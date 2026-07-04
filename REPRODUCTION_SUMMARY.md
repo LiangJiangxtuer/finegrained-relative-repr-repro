@@ -5,7 +5,7 @@
 报告时间：2026-07-03 01:30:51 EDT  
 仓库：`finegrained-relative-repr-repro`
 
-> 当前结论：仓库已经完成严格 PAL 核心实现、COCO2014 约 80K 训练样本 token 缓存、K=512 主模型训练，以及主要 retrieval / zero-shot classification 评测。COCO/Flickr30k Karpathy official split 已对齐并复评；official retrieval 平均 R@1 达到论文目标的约 **86.17%**。Prompt sweep 后分类平均 top-1 达到论文目标的约 **89.56%**。VOC20 full-val segmentation 已完成但只有论文 mIoU 的 **45.89%**。尚未完成 Context/ADE20K segmentation、K / `tau_p` / token-CAP 等消融实验、layer-specific CKA 复训和 baseline 对比。
+> 当前结论：仓库已经完成严格 PAL 核心实现、COCO2014 约 80K 训练样本 token 缓存、K=512 主模型训练，以及主要 retrieval / zero-shot classification 评测。COCO/Flickr30k Karpathy official split 已对齐并复评；official retrieval 平均 R@1 达到论文目标的约 **86.17%**。Prompt sweep 后分类平均 top-1 达到论文目标的约 **89.56%**。VOC20/Context/ADE20K full segmentation 均已跑完，但平均只达到论文 mIoU 的 **23.50%**。K / `tau_p` / token usage 训练型 sweep 已完成；尚未完成这些 ablation checkpoint 的下游指标复评、layer-specific CKA 复训和 baseline 对比。
 
 ---
 
@@ -46,15 +46,14 @@
   - Flickr30k local 1K multi-caption retrieval
   - Flickr30k Karpathy test 1K multi-caption retrieval
   - STL10 / CIFAR100 / Caltech101 / DTD / EuroSAT zero-shot classification 与 prompt-template sweep
-  - VOC20 4-sample segmentation smoke 与 full-val segmentation
-- 当前活跃后台任务：downstream segmentation/ablation pipeline 正在运行 Pascal Context segmentation。
+  - VOC20 / Pascal Context / ADE20K full segmentation
+  - K / `tau_p` / token usage 训练型 sweep
+  - COCO Karpathy anchor-overlap analysis
+- 当前无活跃 Hermes pipeline 后台任务；ordered pipeline 已正常结束。
 
 ### 尚未完成
 
-- Pascal Context / ADE20K segmentation 全量 paper protocol 评测。
-- `K in [32, 64, 128, 256, 512]` anchor count 消融。
-- `tau_p in [0.02, 0.03, 0.05, 0.07, 0.10]` CAP 温度消融。
-- token usage 消融 pipeline 已支持 global / full-token mean / CAP，正式长跑任务已排队。
+- K / `tau_p` / token usage ablation checkpoint 的 retrieval / classification / segmentation 下游指标复评。
 - COCO80K + COCO2017 30K data scaling 实验。
 - 官方/Karpathy split 已完成 COCO/Flickr30k 对齐；prompt template sweep 已完成；CKA proxy sweep 已完成。
 - CSA / LinearRS / MLPRS / SAIL / FA 等 baseline 行的完整对比。
@@ -269,20 +268,21 @@ Prompt-template sweep best-of-4 后：
 | Dataset | Current run | Samples | Local mIoU | Paper target | Gap | Relative | 状态 |
 |---|---|---:|---:|---:|---:|---:|---|
 | VOC20 | full val | 1,449 | 14.82 | 32.30 | -17.48 | 45.89% | full-val 已完成；显著高于 smoke，但仍低于论文 |
-| Context | running | 10,103 | - | 25.50 | - | - | loader 已实现，full evaluation 正在 `proc_fd7c67b922d5` 中运行 |
-| ADE20K | queued | - | - | 13.80 | - | - | loader 已实现，full-val job 已在 downstream pipeline 中排队 |
+| Context | full trainval | 10,103 | 0.53 | 25.50 | -24.97 | 2.09% | full evaluation 已完成，结果提示 protocol/debug gap 较大 |
+| ADE20K | full validation | 2,000 | 1.47 | 13.80 | -12.33 | 10.67% | full evaluation 已完成，结果提示 protocol/debug gap 较大 |
+| **Average** | - | - | **5.61** | **23.87** | **-18.26** | **23.50%** | VOC20/Context/ADE20K 平均 |
 
-Segmentation 结果分析：VOC20 full-val 已跑通，证明 dense patch profile -> class prompt similarity -> mask upsample -> foreground mIoU 的完整路径可执行；但 14.82 mIoU 只达到论文 VOC20 32.30 的 45.89%。下一步重点是完成 Context / ADE20K，并排查 segmentation prompt、背景类/ignore-index、mask resize、类别名与 paper foreground-mIoU 口径。
+Segmentation 结果分析：三套 segmentation full run 均已跑通，证明 dense patch profile -> class prompt similarity -> mask upsample -> foreground mIoU 的完整路径可执行；但 VOC20/Context/ADE20K 平均 mIoU 只有 5.61 vs 论文平均 23.87。下一步重点不是“能否运行”，而是排查 segmentation prompt、背景类/ignore-index、mask resize、类别名、layer selection 与 paper foreground-mIoU 口径。
 
 ### 5.4 消融实验状态
 
 | 实验组 | 论文目标 | 当前状态 | 下一步 |
 |---|---|---|---|
-| Token usage + CAP | global only / full tokens / CAP 三行平均指标 | 未运行 | 在同一 cache 上实现 pooling variant runner，并复现 avg cls / avg ret / avg seg |
-| Anchor count K | `32, 64, 128, 256, 512` | 仅 K=512 完成 | 复用 COCO token cache 训练 K sweep，并跑核心下游指标 |
+| Token usage + CAP | global only / full tokens / CAP 三行平均指标 | 训练型 sweep 完成：global 0.7402 / mean 0.5011 / CAP 0.2834 final loss | 补每个 checkpoint 的 retrieval / classification / segmentation 下游指标 |
+| Anchor count K | `32, 64, 128, 256, 512` | 训练型 sweep 完成；final loss 随 K 增大单调降低：0.5094 -> 0.2834 | 补每个 K 的下游指标，不能只用 train loss 对齐论文表 |
 | Data scaling | COCO80K vs COCO80K + COCO2017 30K | 未运行 | 准备 COCO2017 30K 追加数据与 token cache |
-| CAP temperature `tau_p` | `0.02, 0.03, 0.05, 0.07, 0.10` | 仅 `0.03` 完成 | 固定 K=512 后训练温度 sweep |
-| Anchor overlap | Flickr30k / COCO matched vs mismatched overlap & Dice | 接口存在，未产出表 | 用已训练 checkpoint 计算 top-5 activated anchors overlap |
+| CAP temperature `tau_p` | `0.02, 0.03, 0.05, 0.07, 0.10` | 训练型 sweep 完成；final loss：0.2528 / 0.2834 / 0.3360 / 0.3710 / 0.4077 | 补每个 tau 的下游指标，低 train loss 不等价于 paper 最优 |
+| Anchor overlap | Flickr30k / COCO matched vs mismatched overlap & Dice | COCO Karpathy top-5 完成：matched 0.5176 vs mismatched 0.4367 | 补 qualitative attention / 可视化样例 |
 | Qualitative attention | anchor heatmap / caption attention > 0.5 | 未运行 | 输出可视化样例图和 markdown/csv 索引 |
 
 ---
