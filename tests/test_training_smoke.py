@@ -13,7 +13,7 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from pal_repro.data import TokenTensorDataset, load_token_tensors, split_indices  # noqa: E402
 from pal_repro.eval import recall_at_k, retrieval_metrics  # noqa: E402
-from pal_repro.train import TrainConfig, train_pal  # noqa: E402
+from pal_repro.train import TrainConfig, build_arg_parser, train_pal  # noqa: E402
 
 
 class TestTrainingAndEval(unittest.TestCase):
@@ -121,6 +121,16 @@ class TestTrainingAndEval(unittest.TestCase):
             self.assertEqual(metrics["eval_size"], 0)
             self.assertEqual(metrics["eval"], {})
             self.assertTrue(torch.isfinite(torch.tensor(result["final_train_loss"])).item())
+
+    def test_train_cli_accepts_pool_temperature_override_for_tau_sweep(self) -> None:
+        args = build_arg_parser().parse_args(["--pool-temperature", "0.05"])
+
+        self.assertEqual(args.pool_temperature, 0.05)
+
+    def test_train_cli_accepts_pooling_mode_for_token_usage_ablation(self) -> None:
+        args = build_arg_parser().parse_args(["--pooling-mode", "mean"])
+
+        self.assertEqual(args.pooling_mode, "mean")
 
 
 if __name__ == "__main__":

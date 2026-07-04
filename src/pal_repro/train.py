@@ -28,6 +28,7 @@ class TrainConfig:
     output_dir: Path
     num_anchors: int = 512
     pool_temperature: float = 0.03
+    pooling_mode: str = "cap"
     contrastive_temperature: float = 0.07
     epochs: int = 20
     batch_size: int = 256
@@ -48,6 +49,8 @@ class TrainConfig:
             raise ValueError("batch_size must be positive.")
         if self.lr <= 0:
             raise ValueError("lr must be positive.")
+        if self.pooling_mode not in {"cap", "mean", "global"}:
+            raise ValueError("pooling_mode must be one of: cap, mean, global.")
 
 
 def seed_everything(seed: int) -> None:
@@ -145,6 +148,7 @@ def train_pal(config: TrainConfig) -> dict[str, Any]:
         dim_txt=tensors.dim_txt,
         num_anchors=config.num_anchors,
         pool_temperature=config.pool_temperature,
+        pooling_mode=config.pooling_mode,
     ).to(device)
     optimizer = AdamW(model.parameters(), lr=config.lr, weight_decay=config.weight_decay)
 
@@ -229,6 +233,7 @@ def _flatten_config(raw: dict[str, Any]) -> dict[str, Any]:
         "output_dir": training.get("output_dir", "outputs/pal_run"),
         "num_anchors": model.get("num_anchors", 512),
         "pool_temperature": model.get("pool_temperature", 0.03),
+        "pooling_mode": model.get("pooling_mode", "cap"),
         "contrastive_temperature": training.get("contrastive_temperature", 0.07),
         "epochs": training.get("epochs", 20),
         "batch_size": training.get("batch_size", 256),
@@ -271,6 +276,8 @@ def build_arg_parser() -> argparse.ArgumentParser:
     parser.add_argument("--epochs", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=None)
     parser.add_argument("--num-anchors", type=int, default=None)
+    parser.add_argument("--pool-temperature", type=float, default=None)
+    parser.add_argument("--pooling-mode", choices=["cap", "mean", "global"], default=None)
     parser.add_argument("--device", type=str, default=None)
     parser.add_argument("--lr", type=float, default=None)
     parser.add_argument("--train-size", type=int, default=None)
@@ -286,6 +293,8 @@ def main(argv: list[str] | None = None) -> int:
         ("epochs", "epochs"),
         ("batch_size", "batch_size"),
         ("num_anchors", "num_anchors"),
+        ("pool_temperature", "pool_temperature"),
+        ("pooling_mode", "pooling_mode"),
         ("device", "device"),
         ("lr", "lr"),
         ("train_size", "train_size"),

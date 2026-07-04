@@ -8,6 +8,7 @@ __pycache__/
 outputs/
 data/tokens/
 data/datasets/
+data/splits/
 *.pt
 *.pth
 

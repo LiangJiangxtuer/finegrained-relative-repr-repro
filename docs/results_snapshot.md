@@ -18,13 +18,17 @@ This snapshot records real outputs produced under `/home/hnxxzy/finegrained-rela
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---|---|
 | COCO val first-caption one-to-one | 40,504 | 40,504 | 15.22 | 33.36 | 43.77 | 15.01 | 33.73 | 43.83 | I2T 56.3 / T2I 42.6 | Strict 40,504-way first-caption probe; not paper protocol. |
 | COCO val 5K multi-caption | 5,000 | 25,021 | 49.82 | 77.66 | 86.68 | 37.06 | 66.29 | 77.80 | I2T 56.3 / T2I 42.6 | Closer to paper; local seed=42 5K subset, not confirmed official split. |
+| COCO Karpathy test 5K multi-caption | 5,000 | 25,010 | 49.22 | 77.70 | 86.56 | 36.63 | 66.37 | 77.87 | I2T 56.3 / T2I 42.6 | Standard Karpathy test split from `caption_datasets.zip`; paper-protocol candidate. |
 | Flickr30k local 1K multi-caption | 1,000 | 5,000 | 67.80 | 90.20 | 95.40 | 52.80 | 80.62 | 87.52 | I2T 76.3 / T2I 61.8 | Uses `/home/hnxxzy/Downloads/Flickr30k.zip`; local seed=42 1K subset, not confirmed official split. |
+| Flickr30k Karpathy test 1K multi-caption | 1,000 | 5,000 | 67.40 | 90.10 | 94.90 | 50.96 | 79.18 | 86.76 | I2T 76.3 / T2I 61.8 | Standard Karpathy test split from `caption_datasets.zip`; paper-protocol candidate. |
 
 Retrieval outputs:
 
 - `outputs/pal_k512_coco2014_full/coco_val_first_caption_retrieval.json`
 - `outputs/pal_k512_coco2014_full/coco_val_5k_multicaption_retrieval.json`
+- `outputs/pal_k512_coco2014_full/coco_karpathy_test_multicaption_retrieval.json`
 - `outputs/pal_k512_coco2014_full/flickr30k_1k_multicaption_retrieval.json`
+- `outputs/pal_k512_coco2014_full/flickr30k_karpathy_test_multicaption_retrieval.json`
 
 ## Zero-shot classification
 
@@ -56,13 +60,13 @@ PYTHONPATH=src /home/hnxxzy/miniconda3/envs/ovvs/bin/python -m unittest discover
 Current result:
 
 ```text
-Ran 26 tests in 1.200s
+Ran 42 tests in 1.371s
 OK
 ```
 
 ## Interpretation caveats
 
 - The implementation uses final DINOv2-L/RoBERTa-L hidden tokens. The paper mentions CKA-based layer selection but the exact layer indices were not recovered from the PDF text.
-- COCO 5K and Flickr30k 1K multi-caption evaluations use deterministic local seed-42 subsets. If the paper used a specific official/Karpathy split, the split must be matched before claiming exact parity.
+- COCO and Flickr30k Karpathy test extraction/evaluation are complete. Both are now the preferred retrieval rows for paper-protocol comparison; the older seed-42 subset rows are retained only as historical proxies.
 - Prompting uses `a photo of {class_name}`. Paper prompt templates were not explicit in the PDF text, so prompt/template tuning may explain part of the remaining classification gap.
 - Segmentation and ablation experiments remain incomplete.

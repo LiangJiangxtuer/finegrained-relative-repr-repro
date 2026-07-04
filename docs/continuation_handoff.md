@@ -63,33 +63,59 @@ Always set `PYTHONPATH=src` for module commands.
    - EuroSAT top1: `28.08` vs paper `34.60`
    - average top1: `44.69` vs paper `51.46`
 10. Results snapshot written to `docs/results_snapshot.md`.
-11. Tests currently pass:
+11. Executable reproduction pipeline added:
+   - list steps: `PYTHONPATH=src /home/hnxxzy/miniconda3/envs/ovvs/bin/python scripts/run_reproduction_pipeline.py --list`
+   - runner: `scripts/run_reproduction_pipeline.py --run --skip-existing`
+   - current pipeline covers official/Karpathy split extraction/eval, CKA proxy sweep, prompt sweep, VOC20/Context/ADE20K segmentation, K sweep, tau sweep, token usage ablation, anchor overlap, and baseline tracking.
+12. COCO Karpathy test split completed:
+   - tokens: `data/tokens/coco2014_karpathy_test_multicaption`
+   - images/texts: `5000 / 25010`
+   - output: `outputs/pal_k512_coco2014_full/coco_karpathy_test_multicaption_retrieval.json`
+   - I2T/T2I R@1: `49.22 / 36.63`
+13. Flickr30k Karpathy test split completed:
+   - tokens: `data/tokens/flickr30k_karpathy_test_multicaption`
+   - images/texts: `1000 / 5000`
+   - output: `outputs/pal_k512_coco2014_full/flickr30k_karpathy_test_multicaption_retrieval.json`
+   - I2T/T2I R@1: `67.40 / 50.96`
+14. CKA proxy sweep completed:
+   - output: `outputs/cka/coco_karpathy_layer_sweep.json`
+   - best pair: `vision_layer=-1`, `text_layer=-2`, linear CKA `0.665336`
+15. Tests currently pass:
    - command: `PYTHONPATH=src /home/hnxxzy/miniconda3/envs/ovvs/bin/python -m unittest discover -s tests -v`
-   - result: `Ran 26 tests ... OK`
+   - result: `Ran 42 tests ... OK`
 
 ## Current active long-running process
 
-None at this handoff point.
+Prompt-template classification sweep is running:
+
+```text
+process id: proc_d39c1beb3e5d
+command: PYTHONUNBUFFERED=1 PYTHONPATH=src /home/hnxxzy/miniconda3/envs/ovvs/bin/python scripts/run_prompt_sweep.py --checkpoint outputs/pal_k512_coco2014_full/checkpoint.pt --output-dir outputs/prompt_sweep/classification --batch-size 64 --template 'a photo of {class_name}' --template 'a cropped photo of {class_name}' --template 'a close-up photo of {class_name}' --template 'a clean photo of {class_name}' --local-files-only
+```
+
+A queued downstream pipeline waits for the prompt sweep summary and then starts segmentation + ablations:
+
+```text
+process id: proc_fd7c67b922d5
+starts: scripts/run_reproduction_pipeline.py --run --skip-existing --start-at voc20_full_segmentation
+```
 
 ## Next commands
 
-Segmentation and ablations are the next missing experiment groups. For paper-grade parity, implement/run:
+After `proc_d39c1beb3e5d` exits successfully, inspect:
 
-```text
-VOC20 / Pascal Context / ADE20K dense segmentation evaluation
-anchor_count ablations: K in [32, 64, 128, 256, 512]
-pool_temperature ablations: tau_p in [0.02, 0.03, 0.05, 0.07, 0.1]
+```bash
+cat outputs/prompt_sweep/classification/summary.json
 ```
 
-Classification and COCO retrieval outputs are already under `outputs/pal_k512_coco2014_full/`.
+Then monitor `proc_fd7c67b922d5`; it should run VOC20/Context/ADE20K segmentation, K sweep, tau sweep, token-usage ablation, anchor overlap, and baseline tracking in priority order, skipping outputs that already exist.
 
 ## Known gaps for paper-level parity
 
-1. Flickr30k is now available and evaluated from `/home/hnxxzy/Downloads/Flickr30k.zip`; exact official split still needs to be matched if required for strict parity.
-2. Exact paper retrieval protocol likely needs standard COCO/Flickr official/Karpathy splits; current COCO/Flickr runs use deterministic local seed-42 subsets.
-3. Zero-shot classification runners/results are complete, but remaining gap analysis should investigate prompt templates, exact encoder layer selection, and Caltech101 split/protocol differences.
-4. Segmentation data exists locally for VOC20/Context/ADE20K, but dense token-to-class segmentation runner still needs to be completed.
-5. Ablations for anchor count and pool temperature remain to run.
+1. COCO/Flickr30k Karpathy retrieval split alignment is complete.
+2. Prompt sweep is running; remaining gap analysis should use its result before deciding whether to change prompt templates.
+3. Segmentation runner now supports VOC20/Context/ADE20K, but full mIoU jobs remain to run.
+4. Ablations for anchor count, CAP temperature, and token usage remain to run.
 
 ## Important caveat
 

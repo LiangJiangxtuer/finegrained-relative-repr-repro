@@ -5,7 +5,7 @@
 报告时间：2026-07-03 01:30:51 EDT  
 仓库：`finegrained-relative-repr-repro`
 
-> 当前结论：仓库已经完成严格 PAL 核心实现、COCO2014 约 80K 训练样本 token 缓存、K=512 主模型训练，以及主要 retrieval / zero-shot classification 评测。现有结果达到论文主指标约 75%--97% 不等；检索平均 R@1 达到论文目标的约 **87.55%**，分类平均 top-1 达到论文目标的约 **86.85%**。尚未完成 paper-grade segmentation 全量评测、K / `tau_p` / token-CAP 等消融实验、官方 split / CKA layer selection 对齐和 baseline 对比。
+> 当前结论：仓库已经完成严格 PAL 核心实现、COCO2014 约 80K 训练样本 token 缓存、K=512 主模型训练，以及主要 retrieval / zero-shot classification 评测。COCO/Flickr30k Karpathy official split 已对齐并复评；official retrieval 平均 R@1 达到论文目标的约 **86.17%**，分类平均 top-1 达到论文目标的约 **86.85%**。尚未完成 paper-grade segmentation 全量评测、K / `tau_p` / token-CAP 等消融实验、layer-specific CKA 复训和 baseline 对比。
 
 ---
 
@@ -42,19 +42,21 @@
 - 已完成下游评测：
   - COCO val first-caption one-to-one retrieval proxy
   - COCO val 5K multi-caption retrieval
+  - COCO Karpathy test 5K multi-caption retrieval
   - Flickr30k local 1K multi-caption retrieval
+  - Flickr30k Karpathy test 1K multi-caption retrieval
   - STL10 / CIFAR100 / Caltech101 / DTD / EuroSAT zero-shot classification
   - VOC20 4-sample segmentation smoke
-- 当前无活跃后台训练或评测进程。
+- 当前活跃后台任务：prompt-template classification sweep；后续 segmentation + ablation pipeline 已排队等待 prompt sweep 完成。
 
 ### 尚未完成
 
 - VOC20 / Pascal Context / ADE20K segmentation 全量 paper protocol 评测。
 - `K in [32, 64, 128, 256, 512]` anchor count 消融。
 - `tau_p in [0.02, 0.03, 0.05, 0.07, 0.10]` CAP 温度消融。
-- global-only / full-token-mean / full-token-CAP token usage 消融。
+- token usage 消融 pipeline 已支持 global / full-token mean / CAP，正式长跑任务已排队。
 - COCO80K + COCO2017 30K data scaling 实验。
-- 官方/Karpathy split、论文 prompt template、CKA-selected encoder layer 的精确复现。
+- 官方/Karpathy split 已完成 COCO/Flickr30k 对齐；prompt template sweep 已启动；CKA proxy sweep 已完成。
 - CSA / LinearRS / MLPRS / SAIL / FA 等 baseline 行的完整对比。
 
 ---
@@ -221,13 +223,15 @@ PYTHONPATH=src $PY scripts/evaluate_segmentation.py \
 | Protocol | Images | Texts | Local I2T R@1 | Paper I2T R@1 | Gap | Relative | Local T2I R@1 | Paper T2I R@1 | Gap | Relative | 备注 |
 |---|---:|---:|---:|---:|---:|---:|---:|---:|---:|---:|---|
 | COCO val 5K multi-caption | 5,000 | 25,021 | 49.82 | 56.30 | -6.48 | 88.49% | 37.06 | 42.60 | -5.54 | 87.01% | 接近论文 protocol，但当前为 seed=42 local 5K subset，官方 split 未确认 |
+| COCO Karpathy test 5K multi-caption | 5,000 | 25,010 | 49.22 | 56.30 | -7.08 | 87.42% | 36.63 | 42.60 | -5.97 | 85.99% | 标准 Karpathy test split，当前推荐作为 COCO paper-protocol 对比行 |
 | Flickr30k local 1K multi-caption | 1,000 | 5,000 | 67.80 | 76.30 | -8.50 | 88.86% | 52.80 | 61.80 | -9.00 | 85.44% | 使用 `/home/hnxxzy/Downloads/Flickr30k.zip`，seed=42 local 1K subset，官方 split 未确认 |
+| Flickr30k Karpathy test 1K multi-caption | 1,000 | 5,000 | 67.40 | 76.30 | -8.90 | 88.34% | 50.96 | 61.80 | -10.84 | 82.46% | 标准 Karpathy test split，当前推荐作为 Flickr30k paper-protocol 对比行 |
 
-Retrieval R@1 四项平均：
+Retrieval R@1 四项平均（preferred Karpathy rows）：
 
 | Local avg R@1 | Paper avg R@1 | Gap | Relative |
 |---:|---:|---:|---:|
-| 51.87 | 59.25 | -7.38 | 87.55% |
+| 51.05 | 59.25 | -8.20 | 86.17% |
 
 额外 proxy 结果：COCO val first-caption one-to-one 使用 40,504-way 单 caption 严格检索，I2T/T2I R@1 为 `15.22 / 15.01`。这不是论文 multi-caption protocol，只作为排查与压力测试参考。
 
@@ -254,8 +258,8 @@ Retrieval R@1 四项平均：
 | Dataset | Current run | Samples | Local mIoU | Paper target | Gap | Relative | 状态 |
 |---|---|---:|---:|---:|---:|---:|---|
 | VOC20 | smoke | 4 | 1.69 | 32.30 | -30.61 | 5.23% | 仅验证 runner 可执行，不能代表论文结果 |
-| Context | not run | - | - | 25.50 | - | - | 待实现/运行 |
-| ADE20K | not run | - | - | 13.80 | - | - | 待实现/运行 |
+| Context | queued | - | - | 25.50 | - | - | loader 已实现，full-val job 已在 downstream pipeline 中排队 |
+| ADE20K | queued | - | - | 13.80 | - | - | loader 已实现，full-val job 已在 downstream pipeline 中排队 |
 
 Segmentation 结果分析：当前 VOC20 仅跑了 4 张图的 smoke，主要用于验证 dense patch profile -> class prompt similarity -> mask upsample -> foreground mIoU 的代码路径，没有统计意义。下一步需要补齐全量 VOC20 / Context / ADE20K protocol，并检查是否需要背景类、ignore-index 处理、prompt template、mask resize 和 paper foreground-mIoU 口径对齐。
 
@@ -275,9 +279,10 @@ Segmentation 结果分析：当前 VOC20 仅跑了 4 张图的 smoke，主要用
 ## 6. 当前差距的主要可能原因
 
 1. **评测 split 未完全对齐**  
-   当前 COCO 5K 与 Flickr30k 1K 使用 deterministic seed=42 local subset；如果论文使用官方/Karpathy split，需要替换为完全相同 split 后重新评测。
+   COCO/Flickr30k Karpathy test split 已对齐并复评；旧 seed=42 local subset 仅作为历史 proxy 保留。
 
-2. **CKA layer selection 尚未复现**  
+2. **CKA layer selection 尚未复现**
+   已完成 128-pair CKA proxy sweep，当前最佳 pair 为 `vision_layer=-1`, `text_layer=-2`，但还未做 layer-specific full token extraction + retraining。  
    当前实现默认使用 DINOv2-L / RoBERTa-Large final hidden states。论文提到基于 CKA 选择 encoder layer，但未在已抽取文本中恢复精确 layer indices。若论文实际使用中间层，当前差距可能来自 layer mismatch。
 
 3. **Prompt template 未对齐**  

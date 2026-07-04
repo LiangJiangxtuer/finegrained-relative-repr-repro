@@ -35,6 +35,17 @@ The target is not a smoke demo. The reproduction target is now the complete pape
   - `scripts/run_full_coco_extraction.sh`
   - `scripts/merge_token_chunks.py`
   - `scripts/run_full_pal_train.sh`
+- Added an ordered, executable paper-reproduction pipeline:
+  - `src/pal_repro/pipeline.py`
+  - `scripts/run_reproduction_pipeline.py`
+  - `scripts/prepare_karpathy_splits.py`
+  - `scripts/extract_karpathy_retrieval_tokens.py`
+  - `scripts/run_cka_layer_sweep.py`
+  - `scripts/run_prompt_sweep.py`
+  - `scripts/analyze_anchor_overlap.py`
+  - `scripts/write_baseline_tracking_report.py`
+- Added segmentation loaders for Pascal Context and ADE20K metadata-backed evaluation.
+- Added token-usage ablation support via `pooling_mode={cap,mean,global}`.
 
 ## Verification evidence
 
@@ -47,7 +58,7 @@ PYTHONPATH=src /home/hnxxzy/miniconda3/envs/ovvs/bin/python -m unittest discover
 Result:
 
 ```text
-Ran 15 tests in 1.272s
+Ran 42 tests in 1.371s
 OK
 ```
 
@@ -161,6 +172,30 @@ paper COCO R@1 target: I2T 56.3 / T2I 42.6
 
 The 5K multi-caption protocol is much closer to the paper setting and reaches ~88.5% of the paper I2T R@1 and ~87.0% of the paper T2I R@1. It still uses the local seed=42 5K subset; exact parity requires identifying the paper's split if it is fixed.
 
+Karpathy official split alignment is now complete for COCO and Flickr30k:
+
+```text
+split metadata: data/splits/karpathy/dataset_coco.json and dataset_flickr30k.json
+COCO Karpathy tokens: data/tokens/coco2014_karpathy_test_multicaption
+COCO Karpathy images/texts: 5000 / 25010
+COCO Karpathy output: outputs/pal_k512_coco2014_full/coco_karpathy_test_multicaption_retrieval.json
+COCO Karpathy I2T R@1/R@5/R@10: 49.22 / 77.70 / 86.56
+COCO Karpathy T2I R@1/R@5/R@10: 36.63 / 66.37 / 77.87
+
+Flickr30k Karpathy tokens: data/tokens/flickr30k_karpathy_test_multicaption
+Flickr30k Karpathy images/texts: 1000 / 5000
+Flickr30k Karpathy output: outputs/pal_k512_coco2014_full/flickr30k_karpathy_test_multicaption_retrieval.json
+Flickr30k Karpathy I2T R@1/R@5/R@10: 67.40 / 90.10 / 94.90
+Flickr30k Karpathy T2I R@1/R@5/R@10: 50.96 / 79.18 / 86.76
+```
+
+A CKA proxy sweep over layers `[-1, -2, -6, -12]` on 128 COCO Karpathy pairs has also completed:
+
+```text
+output: outputs/cka/coco_karpathy_layer_sweep.json
+best pair: vision_layer=-1, text_layer=-2, linear CKA=0.665336
+```
+
 Flickr30k local 1K multi-caption retrieval has also been evaluated from `/home/hnxxzy/Downloads/Flickr30k.zip`:
 
 ```text
@@ -188,9 +223,9 @@ Full machine-readable results are summarized in `docs/results_snapshot.md`.
 
 ## Remaining for paper-grade result parity
 
-- Replace deterministic local COCO/Flickr subsets with the exact official/Karpathy split if the paper used one.
-- Reproduce or explicitly sweep/document the CKA layer-selection setting; current runs use final hidden tokens.
-- Complete VOC20 full-val segmentation and add Pascal Context / ADE20K loaders and full foreground-mIoU evaluation.
+- Finish the currently running prompt-template classification sweep.
+- If desired, expand the CKA proxy sweep into full layer-specific token extraction/training/evaluation.
+- Run VOC20 full-val, Pascal Context, and ADE20K foreground-mIoU evaluation.
 - Run ablations for token usage/CAP, anchor count K, CAP temperature `tau_p`, and COCO80K+COCO2017 data scaling.
 - Produce anchor-overlap and qualitative attention visualizations.
 - Implement/run baseline methods if reproducing every comparison row, not just PAL target rows.

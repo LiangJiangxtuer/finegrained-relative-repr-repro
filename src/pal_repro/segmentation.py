@@ -3,9 +3,12 @@
 from __future__ import annotations
 
 from collections.abc import Iterable
+from pathlib import Path
 
+import numpy as np
 import torch
 import torch.nn.functional as F
+from PIL import Image
 
 VOC_CLASS_NAMES: list[str] = [
     "aeroplane",
@@ -29,6 +32,100 @@ VOC_CLASS_NAMES: list[str] = [
     "train",
     "tv monitor",
 ]
+
+
+def parse_pascal_context_labels(lines: Iterable[str]) -> list[tuple[int, str]]:
+    """Parse Pascal Context ``labels.txt`` rows as ``(label_id, name)`` pairs."""
+
+    labels: list[tuple[int, str]] = []
+    for raw in lines:
+        line = raw.strip()
+        if not line or ":" not in line:
+            continue
+        idx, name = line.split(":", 1)
+        labels.append((int(idx.strip()), name.strip()))
+    return sorted(labels, key=lambda item: item[0])
+
+
+def parse_ade20k_object_info(lines: Iterable[str]) -> list[tuple[int, str]]:
+    """Parse ADE20K ``objectInfo150.txt`` rows using the first class-name alias."""
+
+    labels: list[tuple[int, str]] = []
+    for raw in lines:
+        line = raw.strip()
+        if not line or line.startswith("Idx"):
+            continue
+        parts = line.split("\t")
+        if len(parts) < 5:
+            continue
+        class_id = int(parts[0].strip())
+        class_name = parts[-1].split(",", 1)[0].strip()
+        labels.append((class_id, class_name))
+    return sorted(labels, key=lambda item: item[0])
+
+
+class PascalContextSegmentationDataset:
+    """Pascal Context trainval dataset backed by ``LabelMap`` .mat masks."""
+
+    def __init__(self, root: str | Path, image_root: str | Path | None = None) -> None:
+        self.root = Path(root)
+        label_path = self.root / "labels.txt"
+        self.labels = parse_pascal_context_labels(label_path.read_text(encoding="utf-8").splitlines())
+        self.class_ids = [item[0] for item in self.labels]
+        self.class_names = [item[1] for item in self.labels]
+        self.mask_paths = sorted((self.root / "trainval").glob("*.mat"))
+        self.image_root = Path(image_root) if image_root is not None else None
+
+    def __len__(self) -> int:
+        return len(self.mask_paths)
+
+    def _image_path(self, stem: str) -> Path:
+        candidates: list[Path] = []
+        if self.image_root is not None:
+            candidates.append(self.image_root / f"{stem}.jpg")
+        segmentation_root = self.root.parents[1] if len(self.root.parents) > 1 else self.root
+        candidates.extend(
+            [
+                self.root / "JPEGImages" / f"{stem}.jpg",
+                segmentation_root / "voc2010/raw/VOCdevkit/VOC2010/JPEGImages" / f"{stem}.jpg",
+                segmentation_root / "voc2012/VOCdevkit/VOC2012/JPEGImages" / f"{stem}.jpg",
+            ]
+        )
+        for candidate in candidates:
+            if candidate.exists():
+                return candidate
+        raise FileNotFoundError(f"Could not resolve Pascal Context JPEG for {stem}")
+
+    def __getitem__(self, index: int):
+        from scipy.io import loadmat
+
+        mask_path = self.mask_paths[index]
+        stem = mask_path.stem
+        image = Image.open(self._image_path(stem)).convert("RGB")
+        label_map = loadmat(mask_path)["LabelMap"].astype(np.int32)
+        return image, Image.fromarray(label_map, mode="I")
+
+
+class ADE20KSegmentationDataset:
+    """ADE20K validation dataset for 150-class foreground mIoU evaluation."""
+
+    def __init__(self, root: str | Path) -> None:
+        self.root = Path(root)
+        info_path = self.root / "objectInfo150.txt"
+        self.labels = parse_ade20k_object_info(info_path.read_text(encoding="utf-8").splitlines())
+        self.class_ids = [item[0] for item in self.labels]
+        self.class_names = [item[1] for item in self.labels]
+        self.image_paths = sorted((self.root / "images" / "validation").glob("*.jpg"))
+
+    def __len__(self) -> int:
+        return len(self.image_paths)
+
+    def __getitem__(self, index: int):
+        image_path = self.image_paths[index]
+        mask_path = self.root / "annotations" / "validation" / f"{image_path.stem}.png"
+        if not mask_path.exists():
+            raise FileNotFoundError(f"Missing ADE20K mask: {mask_path}")
+        return Image.open(image_path).convert("RGB"), Image.open(mask_path)
 
 
 def segmentation_prompts(class_names: Iterable[str], template: str = "a photo of {class_name}") -> list[str]:

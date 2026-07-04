@@ -58,6 +58,7 @@ class ProjectionFreeAnchorLearning(nn.Module):
         dim_txt: int,
         num_anchors: int = 512,
         pool_temperature: float = 0.03,
+        pooling_mode: str = "cap",
         init_std: float = 0.02,
     ) -> None:
         super().__init__()
@@ -69,11 +70,14 @@ class ProjectionFreeAnchorLearning(nn.Module):
             raise ValueError("pool_temperature must be positive.")
         if init_std <= 0:
             raise ValueError("init_std must be positive.")
+        if pooling_mode not in {"cap", "mean", "global"}:
+            raise ValueError("pooling_mode must be one of: cap, mean, global.")
 
         self.dim_img = int(dim_img)
         self.dim_txt = int(dim_txt)
         self.num_anchors = int(num_anchors)
         self.pool_temperature = float(pool_temperature)
+        self.pooling_mode = pooling_mode
         self.init_std = float(init_std)
 
         self.anchors_img = nn.Parameter(torch.empty(self.num_anchors, self.dim_img))
@@ -135,9 +139,25 @@ class ProjectionFreeAnchorLearning(nn.Module):
             valid = self._validate_mask(mask, tokens.shape)
             logits = logits.masked_fill(~valid.unsqueeze(-1), float("-inf"))
 
-        # Anchor-wise softmax over token positions: alpha_{t,k}.
-        token_attention = F.softmax(logits, dim=1)
-        raw_profile = (token_attention * token_sims).sum(dim=1)
+        if self.pooling_mode == "cap":
+            # Anchor-wise softmax over token positions: alpha_{t,k}.
+            token_attention = F.softmax(logits, dim=1)
+            raw_profile = (token_attention * token_sims).sum(dim=1)
+        elif self.pooling_mode == "mean":
+            if mask is None:
+                raw_profile = token_sims.mean(dim=1)
+            else:
+                valid = self._validate_mask(mask, tokens.shape)
+                weights = valid.to(dtype=token_sims.dtype, device=token_sims.device).unsqueeze(-1)
+                raw_profile = (token_sims * weights).sum(dim=1) / weights.sum(dim=1).clamp_min(1.0)
+        elif self.pooling_mode == "global":
+            if mask is not None:
+                valid = self._validate_mask(mask, tokens.shape)
+                if not valid[:, 0].all():
+                    raise ValueError("global pooling requires the first token to be valid for every sample.")
+            raw_profile = token_sims[:, 0, :]
+        else:  # defensive; __init__ validates this branch is unreachable.
+            raise RuntimeError(f"Unknown pooling_mode: {self.pooling_mode}")
         profile = F.normalize(raw_profile, dim=-1)
         return profile, token_sims
 

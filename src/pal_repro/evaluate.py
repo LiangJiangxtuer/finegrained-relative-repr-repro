@@ -35,11 +35,13 @@ def load_trained_pal_model(
     config = checkpoint.get("config", {})
     num_anchors = int(config.get("num_anchors", anchors_img.shape[0]))
     pool_temperature = float(config.get("pool_temperature", 0.03))
+    pooling_mode = str(config.get("pooling_mode", "cap"))
     model = ProjectionFreeAnchorLearning(
         dim_img=int(checkpoint.get("dim_img", anchors_img.shape[1])),
         dim_txt=int(checkpoint.get("dim_txt", anchors_txt.shape[1])),
         num_anchors=num_anchors,
         pool_temperature=pool_temperature,
+        pooling_mode=pooling_mode,
     )
     model.load_state_dict(state)
     model.to(resolved_device)

@@ -21,6 +21,8 @@ import numpy as np
 
 from pal_repro.evaluate import load_trained_pal_model
 from pal_repro.segmentation import (
+    ADE20KSegmentationDataset,
+    PascalContextSegmentationDataset,
     VOC_CLASS_NAMES,
     dense_patch_logits,
     foreground_miou_from_intersections_unions,
@@ -32,6 +34,8 @@ from pal_repro.segmentation import (
 
 DEFAULT_ROOTS = {
     "VOC20": Path("/home/hnxxzy/projects/DeepScientist/quests/pal-relative-rep-repro/tmp/datasets/pal_public/segmentation/voc2012"),
+    "Context": Path("/home/hnxxzy/projects/DeepScientist/quests/pal-relative-rep-repro/tmp/datasets/pal_public/segmentation/pascal_context/raw"),
+    "ADE20K": Path("/home/hnxxzy/projects/DeepScientist/quests/pal-relative-rep-repro/tmp/datasets/pal_public/segmentation/ade20k/raw/ADEChallengeData2016"),
 }
 
 
@@ -44,6 +48,12 @@ def load_dataset(name: str, root: Path):
     if name == "VOC20":
         ds = datasets.VOCSegmentation(root=str(root), year="2012", image_set="val", download=False)
         return ds, VOC_CLASS_NAMES, list(range(1, 21)), 255, "val"
+    if name == "Context":
+        ds = PascalContextSegmentationDataset(root)
+        return ds, ds.class_names, ds.class_ids, None, "trainval"
+    if name == "ADE20K":
+        ds = ADE20KSegmentationDataset(root)
+        return ds, ds.class_names, ds.class_ids, None, "validation"
     raise ValueError(f"Unsupported dataset: {name}")
 
 

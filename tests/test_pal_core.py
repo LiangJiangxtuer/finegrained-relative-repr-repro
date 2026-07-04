@@ -85,6 +85,29 @@ class TestPALCore(unittest.TestCase):
                 txt_mask=torch.zeros(1, 3, dtype=torch.bool),
             )
 
+    def test_mean_pooling_uses_valid_token_average_for_ablation(self) -> None:
+        model = ProjectionFreeAnchorLearning(dim_img=3, dim_txt=3, num_anchors=2, pooling_mode="mean")
+        with torch.no_grad():
+            model.anchors_img.copy_(torch.tensor([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]))
+            model.anchors_txt.copy_(model.anchors_img)
+        txt_tokens = torch.tensor([[[1.0, 0.0, 0.0], [0.0, 1.0, 0.0], [0.0, 0.0, 1.0]]])
+        txt_mask = torch.tensor([[1, 1, 0]], dtype=torch.bool)
+
+        text_profile = model.encode_text(txt_tokens, txt_mask)
+        expected = torch.nn.functional.normalize(torch.tensor([[0.5, 0.5]]), dim=-1)
+
+        self.assertTrue(torch.allclose(text_profile, expected, atol=1e-6))
+
+    def test_global_pooling_uses_first_token_for_ablation(self) -> None:
+        model = ProjectionFreeAnchorLearning(dim_img=3, dim_txt=3, num_anchors=2, pooling_mode="global")
+        with torch.no_grad():
+            model.anchors_img.copy_(torch.tensor([[1.0, 0.0, 0.0], [0.0, 1.0, 0.0]]))
+        img_tokens = torch.tensor([[[0.0, 1.0, 0.0], [1.0, 0.0, 0.0]]])
+
+        image_profile = model.encode_image(img_tokens)
+
+        self.assertTrue(torch.allclose(image_profile, torch.tensor([[0.0, 1.0]]), atol=1e-6))
+
     def test_input_dimension_validation(self) -> None:
         model = ProjectionFreeAnchorLearning(dim_img=4, dim_txt=4, num_anchors=2)
         with self.assertRaisesRegex(ValueError, "img_tokens"):
