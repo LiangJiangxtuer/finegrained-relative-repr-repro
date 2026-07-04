@@ -196,6 +196,26 @@ output: outputs/cka/coco_karpathy_layer_sweep.json
 best pair: vision_layer=-1, text_layer=-2, linear CKA=0.665336
 ```
 
+Prompt-template classification sweep has completed:
+
+```text
+output: outputs/prompt_sweep/classification/summary.json
+best average top1: 46.09 vs paper 51.46
+gap: -5.37, relative: 89.56%
+best templates: STL10 close-up, CIFAR100 default photo, Caltech101 close-up, DTD cropped, EuroSAT close-up
+```
+
+VOC20 full-val segmentation has completed:
+
+```text
+output: outputs/pal_k512_coco2014_full/voc20_segmentation_full.json
+samples: 1449
+foreground mIoU: 14.82 vs paper 32.30
+gap: -17.48, relative: 45.89%
+```
+
+The downstream pipeline process `proc_fd7c67b922d5` is currently running Pascal Context segmentation (`10103` samples), followed by ADE20K, K/tau/token-usage ablations, anchor overlap, and baseline tracking.
+
 Flickr30k local 1K multi-caption retrieval has also been evaluated from `/home/hnxxzy/Downloads/Flickr30k.zip`:
 
 ```text
@@ -223,9 +243,8 @@ Full machine-readable results are summarized in `docs/results_snapshot.md`.
 
 ## Remaining for paper-grade result parity
 
-- Finish the currently running prompt-template classification sweep.
+- Finish the currently running Pascal Context/ADE20K segmentation jobs.
 - If desired, expand the CKA proxy sweep into full layer-specific token extraction/training/evaluation.
-- Run VOC20 full-val, Pascal Context, and ADE20K foreground-mIoU evaluation.
-- Run ablations for token usage/CAP, anchor count K, CAP temperature `tau_p`, and COCO80K+COCO2017 data scaling.
+- Run remaining K/tau/token-usage ablations after segmentation.
 - Produce anchor-overlap and qualitative attention visualizations.
 - Implement/run baseline methods if reproducing every comparison row, not just PAL target rows.

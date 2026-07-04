@@ -80,41 +80,43 @@ Always set `PYTHONPATH=src` for module commands.
 14. CKA proxy sweep completed:
    - output: `outputs/cka/coco_karpathy_layer_sweep.json`
    - best pair: `vision_layer=-1`, `text_layer=-2`, linear CKA `0.665336`
-15. Tests currently pass:
+15. Prompt-template classification sweep completed:
+   - output: `outputs/prompt_sweep/classification/summary.json`
+   - best average top1: `46.09` vs paper `51.46`
+   - best templates: STL10/Caltech101/EuroSAT close-up, CIFAR100 default photo, DTD cropped
+16. VOC20 full-val segmentation completed:
+   - output: `outputs/pal_k512_coco2014_full/voc20_segmentation_full.json`
+   - samples: `1449`
+   - foreground mIoU: `14.82` vs paper `32.30`
+17. Tests currently pass:
    - command: `PYTHONPATH=src /home/hnxxzy/miniconda3/envs/ovvs/bin/python -m unittest discover -s tests -v`
    - result: `Ran 42 tests ... OK`
 
 ## Current active long-running process
 
-Prompt-template classification sweep is running:
-
-```text
-process id: proc_d39c1beb3e5d
-command: PYTHONUNBUFFERED=1 PYTHONPATH=src /home/hnxxzy/miniconda3/envs/ovvs/bin/python scripts/run_prompt_sweep.py --checkpoint outputs/pal_k512_coco2014_full/checkpoint.pt --output-dir outputs/prompt_sweep/classification --batch-size 64 --template 'a photo of {class_name}' --template 'a cropped photo of {class_name}' --template 'a close-up photo of {class_name}' --template 'a clean photo of {class_name}' --local-files-only
-```
-
-A queued downstream pipeline waits for the prompt sweep summary and then starts segmentation + ablations:
+The downstream segmentation/ablation pipeline is running:
 
 ```text
 process id: proc_fd7c67b922d5
-starts: scripts/run_reproduction_pipeline.py --run --skip-existing --start-at voc20_full_segmentation
+current stage: Pascal Context segmentation, processed at least 168/10103 at last poll
+started by: scripts/run_reproduction_pipeline.py --run --skip-existing --start-at voc20_full_segmentation
 ```
 
 ## Next commands
 
-After `proc_d39c1beb3e5d` exits successfully, inspect:
+Monitor the running downstream pipeline:
 
 ```bash
-cat outputs/prompt_sweep/classification/summary.json
+hermes process poll proc_fd7c67b922d5
 ```
 
-Then monitor `proc_fd7c67b922d5`; it should run VOC20/Context/ADE20K segmentation, K sweep, tau sweep, token-usage ablation, anchor overlap, and baseline tracking in priority order, skipping outputs that already exist.
+It should continue Context -> ADE20K -> K sweep -> tau sweep -> token-usage ablation -> anchor overlap -> baseline tracking, skipping outputs that already exist.
 
 ## Known gaps for paper-level parity
 
 1. COCO/Flickr30k Karpathy retrieval split alignment is complete.
-2. Prompt sweep is running; remaining gap analysis should use its result before deciding whether to change prompt templates.
-3. Segmentation runner now supports VOC20/Context/ADE20K, but full mIoU jobs remain to run.
+2. Prompt sweep is complete; mixed best templates improve classification average top1 to `46.09`, but do not close the full paper gap.
+3. VOC20 full-val is complete; Context is running and ADE20K is queued.
 4. Ablations for anchor count, CAP temperature, and token usage remain to run.
 
 ## Important caveat

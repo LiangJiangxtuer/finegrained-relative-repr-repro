@@ -5,7 +5,7 @@
 报告时间：2026-07-03 01:30:51 EDT  
 仓库：`finegrained-relative-repr-repro`
 
-> 当前结论：仓库已经完成严格 PAL 核心实现、COCO2014 约 80K 训练样本 token 缓存、K=512 主模型训练，以及主要 retrieval / zero-shot classification 评测。COCO/Flickr30k Karpathy official split 已对齐并复评；official retrieval 平均 R@1 达到论文目标的约 **86.17%**，分类平均 top-1 达到论文目标的约 **86.85%**。尚未完成 paper-grade segmentation 全量评测、K / `tau_p` / token-CAP 等消融实验、layer-specific CKA 复训和 baseline 对比。
+> 当前结论：仓库已经完成严格 PAL 核心实现、COCO2014 约 80K 训练样本 token 缓存、K=512 主模型训练，以及主要 retrieval / zero-shot classification 评测。COCO/Flickr30k Karpathy official split 已对齐并复评；official retrieval 平均 R@1 达到论文目标的约 **86.17%**。Prompt sweep 后分类平均 top-1 达到论文目标的约 **89.56%**。VOC20 full-val segmentation 已完成但只有论文 mIoU 的 **45.89%**。尚未完成 Context/ADE20K segmentation、K / `tau_p` / token-CAP 等消融实验、layer-specific CKA 复训和 baseline 对比。
 
 ---
 
@@ -45,18 +45,18 @@
   - COCO Karpathy test 5K multi-caption retrieval
   - Flickr30k local 1K multi-caption retrieval
   - Flickr30k Karpathy test 1K multi-caption retrieval
-  - STL10 / CIFAR100 / Caltech101 / DTD / EuroSAT zero-shot classification
-  - VOC20 4-sample segmentation smoke
-- 当前活跃后台任务：prompt-template classification sweep；后续 segmentation + ablation pipeline 已排队等待 prompt sweep 完成。
+  - STL10 / CIFAR100 / Caltech101 / DTD / EuroSAT zero-shot classification 与 prompt-template sweep
+  - VOC20 4-sample segmentation smoke 与 full-val segmentation
+- 当前活跃后台任务：downstream segmentation/ablation pipeline 正在运行 Pascal Context segmentation。
 
 ### 尚未完成
 
-- VOC20 / Pascal Context / ADE20K segmentation 全量 paper protocol 评测。
+- Pascal Context / ADE20K segmentation 全量 paper protocol 评测。
 - `K in [32, 64, 128, 256, 512]` anchor count 消融。
 - `tau_p in [0.02, 0.03, 0.05, 0.07, 0.10]` CAP 温度消融。
 - token usage 消融 pipeline 已支持 global / full-token mean / CAP，正式长跑任务已排队。
 - COCO80K + COCO2017 30K data scaling 实验。
-- 官方/Karpathy split 已完成 COCO/Flickr30k 对齐；prompt template sweep 已启动；CKA proxy sweep 已完成。
+- 官方/Karpathy split 已完成 COCO/Flickr30k 对齐；prompt template sweep 已完成；CKA proxy sweep 已完成。
 - CSA / LinearRS / MLPRS / SAIL / FA 等 baseline 行的完整对比。
 
 ---
@@ -246,22 +246,33 @@ Retrieval R@1 四项平均（preferred Karpathy rows）：
 | EuroSAT | 27,000 | 28.08 | 72.46 | 34.60 | -6.52 | 81.16% |
 | **Average** | - | **44.69** | - | **51.46** | **-6.77** | **86.85%** |
 
+Prompt-template sweep best-of-4 后：
+
+| Dataset | Best template | Best top-1 | Paper top-1 | Gap | Relative |
+|---|---|---:|---:|---:|---:|
+| STL10 | `a close-up photo of {class_name}` | 92.15 | 95.30 | -3.15 | 96.69% |
+| CIFAR100 | `a photo of {class_name}` | 42.58 | 48.80 | -6.22 | 87.25% |
+| Caltech101 | `a close-up photo of {class_name}` | 48.84 | 60.90 | -12.06 | 80.20% |
+| DTD | `a cropped photo of {class_name}` | 16.54 | 17.70 | -1.16 | 93.46% |
+| EuroSAT | `a close-up photo of {class_name}` | 30.32 | 34.60 | -4.28 | 87.64% |
+| **Average** | mixed best templates | **46.09** | **51.46** | **-5.37** | **89.56%** |
+
 分类结果分析：
 
 - STL10 最接近论文，达到论文 top-1 的 96.50%。
 - Caltech101 差距最大（-15.27），优先排查 split/protocol、class-name mapping、prompt template 与图像预处理。
-- 当前 prompt template 是 `a photo of {class_name}`；论文 PDF 文本未明确 prompt template，因此 prompt engineering 可能解释一部分差距。
+- Prompt sweep 将平均 top-1 从 44.69 提升到 46.09（+1.40），说明模板选择能解释一部分差距，但不是唯一瓶颈。
 - 当前使用 final hidden tokens；论文提到 CKA-based layer selection，但 PDF 文本中未恢复精确 layer indices，这可能影响分类与检索整体差距。
 
 ### 5.3 Segmentation foreground mIoU
 
 | Dataset | Current run | Samples | Local mIoU | Paper target | Gap | Relative | 状态 |
 |---|---|---:|---:|---:|---:|---:|---|
-| VOC20 | smoke | 4 | 1.69 | 32.30 | -30.61 | 5.23% | 仅验证 runner 可执行，不能代表论文结果 |
-| Context | queued | - | - | 25.50 | - | - | loader 已实现，full-val job 已在 downstream pipeline 中排队 |
+| VOC20 | full val | 1,449 | 14.82 | 32.30 | -17.48 | 45.89% | full-val 已完成；显著高于 smoke，但仍低于论文 |
+| Context | running | 10,103 | - | 25.50 | - | - | loader 已实现，full evaluation 正在 `proc_fd7c67b922d5` 中运行 |
 | ADE20K | queued | - | - | 13.80 | - | - | loader 已实现，full-val job 已在 downstream pipeline 中排队 |
 
-Segmentation 结果分析：当前 VOC20 仅跑了 4 张图的 smoke，主要用于验证 dense patch profile -> class prompt similarity -> mask upsample -> foreground mIoU 的代码路径，没有统计意义。下一步需要补齐全量 VOC20 / Context / ADE20K protocol，并检查是否需要背景类、ignore-index 处理、prompt template、mask resize 和 paper foreground-mIoU 口径对齐。
+Segmentation 结果分析：VOC20 full-val 已跑通，证明 dense patch profile -> class prompt similarity -> mask upsample -> foreground mIoU 的完整路径可执行；但 14.82 mIoU 只达到论文 VOC20 32.30 的 45.89%。下一步重点是完成 Context / ADE20K，并排查 segmentation prompt、背景类/ignore-index、mask resize、类别名与 paper foreground-mIoU 口径。
 
 ### 5.4 消融实验状态
 
@@ -285,11 +296,11 @@ Segmentation 结果分析：当前 VOC20 仅跑了 4 张图的 smoke，主要用
    已完成 128-pair CKA proxy sweep，当前最佳 pair 为 `vision_layer=-1`, `text_layer=-2`，但还未做 layer-specific full token extraction + retraining。  
    当前实现默认使用 DINOv2-L / RoBERTa-Large final hidden states。论文提到基于 CKA 选择 encoder layer，但未在已抽取文本中恢复精确 layer indices。若论文实际使用中间层，当前差距可能来自 layer mismatch。
 
-3. **Prompt template 未对齐**  
-   分类与 segmentation 目前使用 `a photo of {class_name}`。论文如果使用 dataset-specific prompt ensemble 或不同模板，可能显著影响 zero-shot classification，尤其是 Caltech101 / EuroSAT。
+3. **Prompt template 只解释了部分差距**  
+   Prompt sweep 已完成，mixed best template 平均 top-1 达到 46.09，较单模板提升 +1.40；Caltech101 / EuroSAT 有明显改善，但距离论文仍有差距。
 
-4. **Segmentation pipeline 仍处于 smoke 阶段**  
-   Dense segmentation 还没有全量运行，也没有完成 Context / ADE20K；当前 mIoU 不能用于论文 parity 判断。
+4. **Segmentation pipeline 已进入 full-val 阶段但仍有差距**  
+   VOC20 full-val mIoU 为 14.82 vs 论文 32.30；Context 正在运行，ADE20K 已排队。
 
 5. **Baseline 和 ablation 尚未完成**  
    当前只比较 PAL 主模型 target row；若目标是完整复现论文所有表格，还需要实现或导入 CSA / LinearRS / MLPRS / SAIL / FA，并运行全部 ablation。

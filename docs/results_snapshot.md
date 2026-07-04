@@ -41,6 +41,17 @@ Retrieval outputs:
 | EuroSAT | 27,000 | 28.08 | 72.46 | 34.60 | -6.52 | 81.2% |
 | Average | - | 44.69 | - | 51.46 | -6.77 | 86.8% |
 
+Prompt-template sweep best-of-4 results:
+
+| Dataset | Best template | Best top1 | Paper top1 | Gap | Relative |
+|---|---|---:|---:|---:|---:|
+| STL10 | `a close-up photo of {class_name}` | 92.15 | 95.30 | -3.15 | 96.69% |
+| CIFAR100 | `a photo of {class_name}` | 42.58 | 48.80 | -6.22 | 87.25% |
+| Caltech101 | `a close-up photo of {class_name}` | 48.84 | 60.90 | -12.06 | 80.20% |
+| DTD | `a cropped photo of {class_name}` | 16.54 | 17.70 | -1.16 | 93.46% |
+| EuroSAT | `a close-up photo of {class_name}` | 30.32 | 34.60 | -4.28 | 87.64% |
+| Average | mixed best templates | 46.09 | 51.46 | -5.37 | 89.56% |
+
 Classification outputs:
 
 - `outputs/pal_k512_coco2014_full/stl10_classification.json`
@@ -48,6 +59,19 @@ Classification outputs:
 - `outputs/pal_k512_coco2014_full/caltech101_classification.json`
 - `outputs/pal_k512_coco2014_full/dtd_classification.json`
 - `outputs/pal_k512_coco2014_full/eurosat_classification.json`
+- `outputs/prompt_sweep/classification/summary.json`
+
+## Segmentation
+
+| Dataset | Split | Samples | Local mIoU | Paper mIoU | Gap | Relative | Notes |
+|---|---|---:|---:|---:|---:|---:|---|
+| VOC20 | val | 1,449 | 14.82 | 32.30 | -17.48 | 45.89% | First full-val run; substantially better than smoke but still below paper. |
+| Context | trainval | 10,103 | running | 25.50 | - | - | Full evaluation is running in `proc_fd7c67b922d5`. |
+| ADE20K | validation | - | pending | 13.80 | - | - | Queued after Context in the same pipeline. |
+
+Segmentation outputs:
+
+- `outputs/pal_k512_coco2014_full/voc20_segmentation_full.json`
 
 ## Verification
 
@@ -68,5 +92,5 @@ OK
 
 - The implementation uses final DINOv2-L/RoBERTa-L hidden tokens. The paper mentions CKA-based layer selection but the exact layer indices were not recovered from the PDF text.
 - COCO and Flickr30k Karpathy test extraction/evaluation are complete. Both are now the preferred retrieval rows for paper-protocol comparison; the older seed-42 subset rows are retained only as historical proxies.
-- Prompting uses `a photo of {class_name}`. Paper prompt templates were not explicit in the PDF text, so prompt/template tuning may explain part of the remaining classification gap.
-- Segmentation and ablation experiments remain incomplete.
+- Prompt-template sweep improved classification average top-1 from 44.69 to 46.09; remaining gap suggests prompt choice is only a partial explanation.
+- VOC20 full-val segmentation is complete; Context/ADE20K and ablation experiments remain incomplete/running.
