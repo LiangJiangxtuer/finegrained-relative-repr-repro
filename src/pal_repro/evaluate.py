@@ -92,6 +92,14 @@ def evaluate_retrieval_token_dir(
         "batch_size": batch_size,
         "device": str(_resolve_device(device)),
         "parameter_names": pal_trainable_parameter_names(model),
+        "protocol": {
+            "source_paper_claim": "Table 2 retrieval R@1",
+            "encoder_layers": _metadata_encoder_layers(token_dir),
+            "dataset_split": _metadata_split(token_dir),
+            "prompt_policy": None,
+            "known_deviation": [],
+            "verification_status": "ANALYZED",
+        },
         **payload,
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -149,6 +157,14 @@ def evaluate_multicaption_retrieval_token_dir(
         "batch_size": batch_size,
         "device": str(resolved_device),
         "parameter_names": pal_trainable_parameter_names(model),
+        "protocol": {
+            "source_paper_claim": "Table 2 retrieval R@1",
+            "encoder_layers": _metadata_encoder_layers(token_dir),
+            "dataset_split": _metadata_split(token_dir),
+            "prompt_policy": None,
+            "known_deviation": [],
+            "verification_status": "ANALYZED",
+        },
         "metrics": metrics,
     }
     output_path.parent.mkdir(parents=True, exist_ok=True)
@@ -163,6 +179,33 @@ def _read_pairs_jsonl(path: Path) -> list[dict[str, Any]]:
             if line.strip():
                 rows.append(json.loads(line))
     return rows
+
+
+def _read_metadata(token_dir: Path) -> dict[str, Any]:
+    metadata_path = token_dir / "metadata.json"
+    if not metadata_path.exists():
+        return {}
+    try:
+        return json.loads(metadata_path.read_text(encoding="utf-8"))
+    except json.JSONDecodeError:
+        return {}
+
+
+def _metadata_encoder_layers(token_dir: Path) -> dict[str, int | None]:
+    metadata = _read_metadata(token_dir)
+    return {
+        "vision_layer": metadata.get("vision_layer"),
+        "text_layer": metadata.get("text_layer"),
+    }
+
+
+def _metadata_split(token_dir: Path) -> str | None:
+    metadata = _read_metadata(token_dir)
+    dataset = metadata.get("dataset")
+    split = metadata.get("split")
+    if dataset and split:
+        return f"{dataset}:{split}"
+    return split
 
 
 def _pairs_jsonl_path(token_dir: Path) -> Path:

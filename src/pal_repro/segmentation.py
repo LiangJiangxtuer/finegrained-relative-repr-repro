@@ -51,6 +51,13 @@ SEGMENTATION_CLASS_NAME_ALIASES: dict[str, str] = {
     "tvmonitor": "tv monitor",
 }
 
+DEFAULT_SEGMENTATION_PROMPT_TEMPLATES: tuple[str, ...] = (
+    "a photo of {class_name}",
+    "a close-up photo of {class_name}",
+    "a cropped photo of {class_name}",
+    "a clean photo of {class_name}",
+)
+
 
 def normalize_segmentation_class_name(name: str) -> str:
     """Return prompt-friendly class names for dense zero-shot segmentation."""
@@ -93,7 +100,13 @@ def select_pascal_context_labels(
 def parse_ade20k_object_info(lines: Iterable[str]) -> list[tuple[int, str]]:
     """Parse ADE20K ``objectInfo150.txt`` rows using the first class-name alias."""
 
-    labels: list[tuple[int, str]] = []
+    return [(class_id, aliases[0]) for class_id, aliases in parse_ade20k_object_aliases(lines)]
+
+
+def parse_ade20k_object_aliases(lines: Iterable[str]) -> list[tuple[int, list[str]]]:
+    """Parse ADE20K rows while preserving all comma-separated class aliases."""
+
+    rows: list[tuple[int, list[str]]] = []
     for raw in lines:
         line = raw.strip()
         if not line or line.startswith("Idx"):
@@ -102,9 +115,14 @@ def parse_ade20k_object_info(lines: Iterable[str]) -> list[tuple[int, str]]:
         if len(parts) < 5:
             continue
         class_id = int(parts[0].strip())
-        class_name = parts[-1].split(",", 1)[0].strip()
-        labels.append((class_id, class_name))
-    return sorted(labels, key=lambda item: item[0])
+        aliases = [
+            normalize_segmentation_class_name(item)
+            for item in parts[-1].split(",")
+            if item.strip()
+        ]
+        if aliases:
+            rows.append((class_id, aliases))
+    return sorted(rows, key=lambda item: item[0])
 
 
 class PascalContextSegmentationDataset:
@@ -157,7 +175,8 @@ class ADE20KSegmentationDataset:
     def __init__(self, root: str | Path) -> None:
         self.root = Path(root)
         info_path = self.root / "objectInfo150.txt"
-        self.labels = parse_ade20k_object_info(info_path.read_text(encoding="utf-8").splitlines())
+        self.class_aliases = parse_ade20k_object_aliases(info_path.read_text(encoding="utf-8").splitlines())
+        self.labels = [(class_id, aliases[0]) for class_id, aliases in self.class_aliases]
         self.class_ids = [item[0] for item in self.labels]
         self.class_names = [item[1] for item in self.labels]
         self.image_paths = sorted((self.root / "images" / "validation").glob("*.jpg"))
@@ -175,6 +194,26 @@ class ADE20KSegmentationDataset:
 
 def segmentation_prompts(class_names: Iterable[str], template: str = "a photo of {class_name}") -> list[str]:
     return [template.format(class_name=name) for name in class_names]
+
+
+def build_segmentation_prompt_groups(
+    class_aliases: Iterable[Iterable[str] | str],
+    templates: Iterable[str] = DEFAULT_SEGMENTATION_PROMPT_TEMPLATES,
+) -> list[list[str]]:
+    """Build one prompt ensemble per segmentation class."""
+
+    template_list = list(templates)
+    if not template_list:
+        raise ValueError("templates must contain at least one prompt template.")
+    groups: list[list[str]] = []
+    for aliases in class_aliases:
+        alias_list = [aliases] if isinstance(aliases, str) else list(aliases)
+        prompts: list[str] = []
+        for alias in alias_list:
+            normalized = normalize_segmentation_class_name(alias)
+            prompts.extend(template.format(class_name=normalized) for template in template_list)
+        groups.append(prompts)
+    return groups
 
 
 def _get_hw(mapping: dict[str, int] | None, default: int) -> tuple[int, int]:

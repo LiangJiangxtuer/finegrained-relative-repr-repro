@@ -10,6 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "src"))
 
 from pal_repro.classification import (  # noqa: E402
+    build_class_prompt_groups,
     build_class_prompts,
     classification_topk,
     normalize_class_name,
@@ -25,6 +26,23 @@ class TestClassificationSupport(unittest.TestCase):
     def test_build_class_prompts_uses_article_free_photo_template(self) -> None:
         prompts = build_class_prompts(["aquarium_fish", "AnnualCrop"])
         self.assertEqual(prompts, ["a photo of aquarium fish", "a photo of annual crop"])
+
+    def test_build_class_prompt_groups_keeps_fair_template_ensemble_per_class(self) -> None:
+        groups = build_class_prompt_groups(
+            ["AnnualCrop", "Highway"],
+            templates=[
+                "a photo of {class_name}",
+                "a clean photo of {class_name}",
+            ],
+        )
+
+        self.assertEqual(
+            groups,
+            [
+                ["a photo of annual crop", "a clean photo of annual crop"],
+                ["a photo of highway", "a clean photo of highway"],
+            ],
+        )
 
     def test_classification_topk_reports_percentages(self) -> None:
         similarity = torch.tensor(

@@ -1,0 +1,82 @@
+paper:
+  title: Learning Relative Representations for Fine-Grained Multimodal Alignment with Limited Data
+  source: arXiv:2605.16834
+  implementation_status: protocol_convergence
+
+encoder_layers:
+  default:
+    vision_layer: null
+    text_layer: null
+    note: Final hidden states are the current baseline. The paper states CKA-based layer selection but does not disclose exact indices.
+  cka_proxy_grid:
+    dataset: coco_karpathy_test
+    caption_policy: first
+    sample_pairs: 1024
+    vision_layers: [-1, -2, -4, -6, -8, -10, -12, -16, -20, -24]
+    text_layers: [-1, -2, -4, -6, -8, -10, -12, -16, -20, -24]
+    top_k: 3
+    selection_rule: top3_layer_pairs_plus_final_layer_baseline
+
+training:
+  train_data: coco2014_train_first_caption
+  train_pairs: 82783
+  num_anchors: 512
+  pool_temperature: 0.03
+  contrastive_temperature: 0.07
+  epochs: 20
+  batch_size: 128
+  seed: 42
+  known_deviation:
+    - Paper does not publish epoch, optimizer, scheduler, or contrastive temperature details.
+
+classification:
+  datasets: [STL10, CIFAR100, Caltech101, DTD, EuroSAT]
+  prompt_templates:
+    - a photo of {class_name}
+    - a close-up photo of {class_name}
+    - a cropped photo of {class_name}
+    - a clean photo of {class_name}
+  aggregation: normalized_mean_per_class
+  required_outputs:
+    - top1
+    - top5
+    - per_class_accuracy
+    - protocol
+
+retrieval:
+  splits:
+    coco: Karpathy test 5K multi-caption
+    flickr30k: Karpathy test 1K multi-caption
+  metrics: [i2t_r1, t2i_r1, i2t_r5, t2i_r5, i2t_r10, t2i_r10]
+
+segmentation:
+  datasets:
+    VOC20:
+      target_frame: processor
+      context_protocol: null
+      alias_policy: first
+    Context:
+      target_frame: processor
+      context_protocol: common59
+      alias_policy: first
+    ADE20K:
+      target_frame: processor
+      context_protocol: null
+      alias_policy: all
+  prompt_templates:
+    - a photo of {class_name}
+    - a close-up photo of {class_name}
+    - a cropped photo of {class_name}
+    - a clean photo of {class_name}
+  aggregation: normalized_mean_per_class
+  required_outputs:
+    - foreground_miou
+    - class_ious
+    - top_predicted_classes
+    - target_frequency
+    - confusion_samples
+    - protocol
+
+acceptance:
+  primary_goal: shrink_main_result_gap_before_full_ablation
+  report_negative_result_if: best_layer_protocol_combo_does_not_improve_proxy_metrics
