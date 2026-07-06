@@ -100,9 +100,27 @@ Always set `PYTHONPATH=src` for module commands.
    - matched `0.517633` vs mismatched `0.436705`
 20. Full pipeline result summary written:
    - `docs/pipeline_results_snapshot.md`
-21. Tests currently pass:
+21. Segmentation protocol debug pass completed:
+   - script: `scripts/diagnose_segmentation_protocol.py`
+   - notes: `docs/segmentation_debug_notes.md`
+   - probe outputs: `outputs/diagnostics/*_segmentation_protocol_probe*.json`
+   - key finding: DINOv2 preprocessing uses resize-shortest-edge 256 plus 224x224 center crop; existing full segmentation metrics scored against original masks. Processor-aligned masks improve small-probe mIoU, but Context protocol/name normalization and dense layer selection remain unresolved.
+22. Segmentation protocol fixes promoted to formal evaluator:
+   - `scripts/evaluate_segmentation.py --target-frame {original,processor}`
+   - `scripts/evaluate_segmentation.py --context-protocol {all459,common59}`
+   - `src/pal_repro/segmentation.py` now includes shared processor-frame mask transform, Pascal Context common-59 selection, prompt-friendly class-name aliases, and non-contiguous label-ID prediction mapping.
+   - Corrected 16-sample formal probes: VOC20 processor-frame `12.5179`, Context common-59 processor-frame `12.3125`, ADE20K processor-frame `0.2571`.
+   - Full rerun condition: treat old segmentation JSONs as historical; use `--target-frame processor` for VOC20/ADE20K and `--target-frame processor --context-protocol common59` for Context.
+23. Corrected full segmentation rerun completed normally:
+   - process: `proc_a795405ceceb`, exit code `0`
+   - log: `outputs/logs/corrected_segmentation_rerun_20260705_104725.log`
+   - VOC20 output: `outputs/pal_k512_coco2014_full/voc20_segmentation_processor_full.json`, mIoU `20.58` vs paper `32.30`
+   - Context output: `outputs/pal_k512_coco2014_full/context_segmentation_common59_processor_full.json`, mIoU `11.23` vs paper `25.50`
+   - ADE20K output: `outputs/pal_k512_coco2014_full/ade20k_segmentation_processor_full.json`, mIoU `2.19` vs paper `13.80`
+   - corrected average: `11.33` vs paper `23.87`; old historical average was `5.61`.
+24. Tests currently pass:
    - command: `PYTHONPATH=src /home/hnxxzy/miniconda3/envs/ovvs/bin/python -m unittest discover -s tests -v`
-   - result: `Ran 42 tests ... OK`
+   - result: `Ran 47 tests in 0.183s ... OK`
 
 ## Current active long-running process
 
@@ -110,13 +128,13 @@ No active Hermes-managed background process at this handoff point. `proc_fd7c67b
 
 ## Next commands
 
-Next useful commands are documentation/commit checks and optional downstream ablation evaluation. The existing K/tau/token checkpoints have only training-loss metrics; run retrieval/classification/segmentation evaluations per checkpoint before claiming paper ablation-table parity.
+Next useful commands are documentation/commit checks, segmentation protocol fixes, and optional downstream ablation evaluation. The existing K/tau/token checkpoints have only training-loss metrics; run retrieval/classification/segmentation evaluations per checkpoint before claiming paper ablation-table parity.
 
 ## Known gaps for paper-level parity
 
 1. COCO/Flickr30k Karpathy retrieval split alignment is complete.
 2. Prompt sweep is complete; mixed best templates improve classification average top1 to `46.09`, but do not close the full paper gap.
-3. VOC20/Context/ADE20K full segmentation runs are complete but far below paper, especially Context/ADE20K; dense protocol debugging remains.
+3. VOC20/Context/ADE20K corrected full segmentation rerun is complete. Corrected protocol improves average mIoU from `5.61` to `11.33`, but remains below paper; ADE20K still needs prompt/name/layer debugging and Context likely needs dense-token layer/prompt ensemble work for paper parity.
 4. Ablation training runs are complete, but downstream ablation metrics remain to run.
 
 ## Important caveat

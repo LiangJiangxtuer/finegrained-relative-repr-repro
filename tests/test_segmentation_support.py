@@ -3,7 +3,9 @@ from __future__ import annotations
 import sys
 import unittest
 from pathlib import Path
+from types import SimpleNamespace
 
+import numpy as np
 import torch
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -11,14 +13,18 @@ sys.path.insert(0, str(ROOT / "src"))
 
 from pal_repro.segmentation import (  # noqa: E402
     ADE20KSegmentationDataset,
+    PASCAL_CONTEXT_59_CLASS_NAMES,
     PascalContextSegmentationDataset,
     VOC_CLASS_NAMES,
     foreground_miou_from_intersections_unions,
     parse_ade20k_object_info,
     parse_pascal_context_labels,
     patch_logits_to_label_mask,
+    select_pascal_context_labels,
+    transform_mask_like_image_processor,
     update_intersections_unions,
 )
+from scripts.evaluate_segmentation import build_parser, load_dataset  # noqa: E402
 
 
 class TestSegmentationSupport(unittest.TestCase):
@@ -42,6 +48,20 @@ class TestSegmentationSupport(unittest.TestCase):
         self.assertEqual(tuple(pred.shape), (1, 4, 4))
         self.assertEqual(int(pred.min()), 1)
         self.assertEqual(int(pred.max()), 2)
+
+    def test_patch_logits_to_label_mask_maps_non_contiguous_label_ids(self) -> None:
+        logits = torch.tensor(
+            [
+                [
+                    [[3.0, 1.0], [1.0, 0.0]],
+                    [[0.0, 2.0], [4.0, 5.0]],
+                ]
+            ]
+        )
+
+        pred = patch_logits_to_label_mask(logits, output_size=(2, 2), label_ids=[2, 9])
+
+        self.assertEqual(pred.tolist(), [[[2, 9], [9, 9]]])
 
     def test_intersection_union_accumulator_ignores_background_and_255(self) -> None:
         pred = torch.tensor([[1, 2, 2], [1, 1, 2]])
@@ -69,6 +89,48 @@ class TestSegmentationSupport(unittest.TestCase):
         self.assertEqual(labels[0], (1, "accordion"))
         self.assertEqual(labels[1], (23, "bicycle"))
         self.assertEqual(labels[-1], (459, "wood"))
+
+    def test_select_pascal_context_common59_maps_raw_label_ids(self) -> None:
+        labels = [(idx + 1, name) for idx, name in enumerate(PASCAL_CONTEXT_59_CLASS_NAMES)]
+
+        selected = select_pascal_context_labels(labels, protocol="common59")
+
+        self.assertEqual(len(selected), 59)
+        self.assertEqual(selected[0], (1, "aeroplane"))
+        self.assertEqual(selected[-1], (59, "wood"))
+
+    def test_evaluate_segmentation_parser_exposes_target_frame_and_context_protocol(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "--dataset", "Context",
+                "--checkpoint", "checkpoint.pt",
+                "--output", "out.json",
+                "--target-frame", "processor",
+                "--context-protocol", "common59",
+            ]
+        )
+
+        self.assertEqual(args.target_frame, "processor")
+        self.assertEqual(args.context_protocol, "common59")
+
+    def test_load_context_dataset_common59_uses_selected_raw_ids_and_prompt_names(self) -> None:
+        import tempfile
+
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "trainval").mkdir()
+            rows = [f"{idx + 10}: {name}" for idx, name in enumerate(PASCAL_CONTEXT_59_CLASS_NAMES)]
+            (root / "labels.txt").write_text("\n".join(rows), encoding="utf-8")
+
+            _dataset, class_names, class_ids, _ignore, _split = load_dataset(
+                "Context",
+                root,
+                context_protocol="common59",
+            )
+
+        self.assertEqual(len(class_ids), 59)
+        self.assertEqual(class_ids[0], 10)
+        self.assertEqual(class_names[PASCAL_CONTEXT_59_CLASS_NAMES.index("tvmonitor")], "tv monitor")
 
     def test_parse_ade20k_object_info_uses_first_name_alias(self) -> None:
         rows = [
@@ -102,6 +164,31 @@ class TestSegmentationSupport(unittest.TestCase):
         self.assertEqual(context.class_names, ["accordion", "aeroplane"])
         self.assertEqual(ade.class_ids, [1, 2])
         self.assertEqual(ade.class_names, ["wall", "building"])
+
+    def test_transform_mask_like_image_processor_matches_resize_center_crop_geometry(self) -> None:
+        from PIL import Image
+
+        mask = Image.fromarray(
+            np.array(
+                [
+                    [0, 1, 2, 3, 4, 5],
+                    [10, 11, 12, 13, 14, 15],
+                    [20, 21, 22, 23, 24, 25],
+                    [30, 31, 32, 33, 34, 35],
+                ],
+                dtype=np.uint8,
+            )
+        )
+        processor = SimpleNamespace(
+            do_resize=True,
+            size={"shortest_edge": 4},
+            do_center_crop=True,
+            crop_size={"height": 2, "width": 2},
+        )
+
+        transformed = transform_mask_like_image_processor(mask, processor)
+
+        self.assertEqual(np.asarray(transformed).tolist(), [[12, 13], [22, 23]])
 
 
 if __name__ == "__main__":

@@ -61,13 +61,25 @@ Prompt sweep improves average top-1 from `44.69` to `46.09` (`+1.40`) but does n
 | ADE20K | validation | 2,000 | 1.47 | 13.80 | -12.33 | 10.67% |
 | Average | - | - | 5.61 | 23.87 | -18.26 | 23.50% |
 
-Segmentation is now fully executable for all three paper datasets, but performance is far below paper. This points to remaining protocol/implementation gaps in dense evaluation: class naming, background/ignore treatment, prompt design, mask resizing, layer selection, or other paper-specific dense-alignment details.
+Segmentation is now fully executable for all three paper datasets, but the original full-run metrics are historical because the protocol has since been corrected. `docs/segmentation_debug_notes.md` records the follow-up: `scripts/evaluate_segmentation.py` now supports explicit `--target-frame {original,processor}` and `--context-protocol {all459,common59}`. Corrected 16-sample formal probes give VOC20 processor-frame `12.52`, Context common-59 processor-frame `12.31`, and ADE20K processor-frame `0.257`; the Context jump confirms the old 459-class Context path was a major mismatch.
+
+Corrected full-run segmentation results are now available:
+
+| Dataset | Corrected protocol | Samples | Classes | Local mIoU | Paper mIoU | Gap | Relative | Delta vs old |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| VOC20 | processor frame | 1,449 | 20 | 20.58 | 32.30 | -11.72 | 63.71% | +5.75 |
+| Pascal Context | processor frame + common59 | 10,103 | 59 | 11.23 | 25.50 | -14.27 | 44.05% | +10.70 |
+| ADE20K | processor frame | 2,000 | 150 | 2.19 | 13.80 | -11.61 | 15.87% | +0.72 |
+| Average | - | - | - | 11.33 | 23.87 | -12.53 | 47.48% | +5.72 |
 
 Outputs:
 
 - `outputs/pal_k512_coco2014_full/voc20_segmentation_full.json`
 - `outputs/pal_k512_coco2014_full/context_segmentation_full.json`
 - `outputs/pal_k512_coco2014_full/ade20k_segmentation_full.json`
+- `outputs/pal_k512_coco2014_full/voc20_segmentation_processor_full.json`
+- `outputs/pal_k512_coco2014_full/context_segmentation_common59_processor_full.json`
+- `outputs/pal_k512_coco2014_full/ade20k_segmentation_processor_full.json`
 
 ## K sweep
 
@@ -126,6 +138,9 @@ Matched vs mismatched overlap gap: `+0.080928` absolute, `+18.53%` relative over
 
 1. Run downstream retrieval/classification/segmentation metrics for each K, `tau_p`, and token-usage checkpoint; current sweep outputs are training-loss-only.
 2. Expand the CKA proxy result into layer-specific token extraction + retraining if strict layer-selection parity is required.
-3. Debug dense segmentation protocol; Context and ADE20K are now runnable but far below paper.
+3. Continue dense segmentation debugging from the corrected full rerun; old segmentation JSONs are baseline/historical.
+   - Start from `docs/segmentation_debug_notes.md` and `scripts/diagnose_segmentation_protocol.py`.
+   - Corrected full rerun is complete: VOC20 `20.58`, Context `11.23`, ADE20K `2.19`, average `11.33`.
+   - ADE20K still needs prompt/name/layer debugging; Context may need dense-token layer selection and prompt ensemble to approach the paper row.
 4. Add qualitative attention visualizations.
 5. Implement or port baseline rows (CSA, LinearRS, MLPRS, SAIL, FA) if reproducing full comparison tables.

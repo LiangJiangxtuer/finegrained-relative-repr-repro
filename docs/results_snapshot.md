@@ -63,6 +63,8 @@ Classification outputs:
 
 ## Segmentation
 
+The first table is retained as a historical baseline because it used the old implicit original-mask frame and Pascal Context all-459 protocol.
+
 | Dataset | Split | Samples | Local mIoU | Paper mIoU | Gap | Relative | Notes |
 |---|---|---:|---:|---:|---:|---:|---|
 | VOC20 | val | 1,449 | 14.82 | 32.30 | -17.48 | 45.89% | First full-val run; substantially better than smoke but still below paper. |
@@ -70,11 +72,36 @@ Classification outputs:
 | ADE20K | validation | 2,000 | 1.47 | 13.80 | -12.33 | 10.67% | Full evaluation complete; likely protocol/debug gap. |
 | Average | - | - | 5.61 | 23.87 | -18.26 | 23.50% | Average over VOC20/Context/ADE20K. |
 
+Corrected full rerun results:
+
+| Dataset | Corrected protocol | Samples | Classes | Corrected mIoU | Paper mIoU | Gap | Relative | Delta vs historical |
+|---|---|---:|---:|---:|---:|---:|---:|---:|
+| VOC20 | `--target-frame processor` | 1,449 | 20 | 20.58 | 32.30 | -11.72 | 63.71% | +5.75 |
+| Context | `--target-frame processor --context-protocol common59` | 10,103 | 59 | 11.23 | 25.50 | -14.27 | 44.05% | +10.70 |
+| ADE20K | `--target-frame processor` | 2,000 | 150 | 2.19 | 13.80 | -11.61 | 15.87% | +0.72 |
+| Average | - | - | - | 11.33 | 23.87 | -12.53 | 47.48% | +5.72 |
+
 Segmentation outputs:
 
 - `outputs/pal_k512_coco2014_full/voc20_segmentation_full.json`
 - `outputs/pal_k512_coco2014_full/context_segmentation_full.json`
 - `outputs/pal_k512_coco2014_full/ade20k_segmentation_full.json`
+- `outputs/pal_k512_coco2014_full/voc20_segmentation_processor_full.json`
+- `outputs/pal_k512_coco2014_full/context_segmentation_common59_processor_full.json`
+- `outputs/pal_k512_coco2014_full/ade20k_segmentation_processor_full.json`
+
+Segmentation protocol diagnostics:
+
+- notes: `docs/segmentation_debug_notes.md`
+- probe script: `scripts/diagnose_segmentation_protocol.py`
+- probe outputs: `outputs/diagnostics/*_segmentation_protocol_probe*.json`
+- formal evaluator support: `scripts/evaluate_segmentation.py --target-frame {original,processor}` and `--context-protocol {all459,common59}`.
+- corrected 16-sample formal probes:
+  - VOC20, `--target-frame processor`: mIoU `12.5179`.
+  - Pascal Context, `--target-frame processor --context-protocol common59`: mIoU `12.3125` over 59 classes.
+  - ADE20K, `--target-frame processor`: mIoU `0.2571`.
+- interpretation: the old full-run Context number used all 459 labels and original-mask scoring; it should now be treated as historical. Common-59 + processor-frame scoring is the required rerun condition for Context. ADE20K remains unresolved because processor-frame scoring alone barely improves the cheap probe.
+- corrected full-run interpretation: the corrected protocol roughly doubles the segmentation macro average (`5.61 -> 11.33`) but remains below paper (`23.87`); ADE20K is still the main unresolved dense-evaluation gap.
 
 ## Completed pipeline sweeps and analyses
 
@@ -134,7 +161,7 @@ PYTHONPATH=src /home/hnxxzy/miniconda3/envs/ovvs/bin/python -m unittest discover
 Current result:
 
 ```text
-Ran 42 tests in 1.371s
+Ran 47 tests in 0.183s
 OK
 ```
 
@@ -143,4 +170,4 @@ OK
 - The implementation uses final DINOv2-L/RoBERTa-L hidden tokens. The paper mentions CKA-based layer selection but the exact layer indices were not recovered from the PDF text.
 - COCO and Flickr30k Karpathy test extraction/evaluation are complete. Both are now the preferred retrieval rows for paper-protocol comparison; the older seed-42 subset rows are retained only as historical proxies.
 - Prompt-template sweep improved classification average top-1 from 44.69 to 46.09; remaining gap suggests prompt choice is only a partial explanation.
-- VOC20/Context/ADE20K full segmentation runs are complete, but segmentation remains far below paper and needs protocol debugging. K/`tau_p`/token-usage sweep training is complete; downstream ablation metrics remain to be run.
+- VOC20/Context/ADE20K corrected full segmentation rerun is complete. Processor-frame + Context common-59 roughly doubles macro mIoU (`5.61 -> 11.33`), but still trails the paper average (`23.87`), with ADE20K remaining the main unresolved dense-evaluation gap. K/`tau_p`/token-usage sweep training is complete; downstream ablation metrics remain to be run.

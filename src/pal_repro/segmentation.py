@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from collections.abc import Iterable
 from pathlib import Path
+from typing import Any
 
 import numpy as np
 import torch
@@ -33,6 +34,30 @@ VOC_CLASS_NAMES: list[str] = [
     "tv monitor",
 ]
 
+PASCAL_CONTEXT_59_CLASS_NAMES: tuple[str, ...] = (
+    "aeroplane", "bag", "bed", "bedclothes", "bench", "bicycle", "bird",
+    "boat", "book", "bottle", "building", "bus", "cabinet", "car", "cat",
+    "ceiling", "chair", "cloth", "computer", "cow", "cup", "curtain", "dog",
+    "door", "fence", "floor", "flower", "food", "grass", "ground", "horse",
+    "keyboard", "light", "motorbike", "mountain", "mouse", "person", "plate",
+    "platform", "pottedplant", "road", "rock", "sheep", "shelves", "sidewalk",
+    "sign", "sky", "snow", "sofa", "table", "track", "train", "tree", "truck",
+    "tvmonitor", "wall", "water", "window", "wood",
+)
+
+SEGMENTATION_CLASS_NAME_ALIASES: dict[str, str] = {
+    "bedclothes": "bed clothes",
+    "pottedplant": "potted plant",
+    "tvmonitor": "tv monitor",
+}
+
+
+def normalize_segmentation_class_name(name: str) -> str:
+    """Return prompt-friendly class names for dense zero-shot segmentation."""
+
+    stripped = name.strip()
+    return SEGMENTATION_CLASS_NAME_ALIASES.get(stripped, stripped.replace("_", " "))
+
 
 def parse_pascal_context_labels(lines: Iterable[str]) -> list[tuple[int, str]]:
     """Parse Pascal Context ``labels.txt`` rows as ``(label_id, name)`` pairs."""
@@ -45,6 +70,24 @@ def parse_pascal_context_labels(lines: Iterable[str]) -> list[tuple[int, str]]:
         idx, name = line.split(":", 1)
         labels.append((int(idx.strip()), name.strip()))
     return sorted(labels, key=lambda item: item[0])
+
+
+def select_pascal_context_labels(
+    labels: Iterable[tuple[int, str]],
+    protocol: str = "all459",
+) -> list[tuple[int, str]]:
+    """Select Pascal Context labels for either all-459 or common-59 protocol."""
+
+    rows = list(labels)
+    if protocol == "all459":
+        return rows
+    if protocol != "common59":
+        raise ValueError(f"Unsupported Pascal Context protocol: {protocol}")
+    by_name = {name: (label_id, name) for label_id, name in rows}
+    missing = [name for name in PASCAL_CONTEXT_59_CLASS_NAMES if name not in by_name]
+    if missing:
+        raise ValueError(f"Missing Pascal Context common59 labels: {missing}")
+    return [by_name[name] for name in PASCAL_CONTEXT_59_CLASS_NAMES]
 
 
 def parse_ade20k_object_info(lines: Iterable[str]) -> list[tuple[int, str]]:
@@ -67,12 +110,14 @@ def parse_ade20k_object_info(lines: Iterable[str]) -> list[tuple[int, str]]:
 class PascalContextSegmentationDataset:
     """Pascal Context trainval dataset backed by ``LabelMap`` .mat masks."""
 
-    def __init__(self, root: str | Path, image_root: str | Path | None = None) -> None:
+    def __init__(self, root: str | Path, image_root: str | Path | None = None, protocol: str = "all459") -> None:
         self.root = Path(root)
+        self.protocol = protocol
         label_path = self.root / "labels.txt"
-        self.labels = parse_pascal_context_labels(label_path.read_text(encoding="utf-8").splitlines())
+        raw_labels = parse_pascal_context_labels(label_path.read_text(encoding="utf-8").splitlines())
+        self.labels = select_pascal_context_labels(raw_labels, protocol=protocol)
         self.class_ids = [item[0] for item in self.labels]
-        self.class_names = [item[1] for item in self.labels]
+        self.class_names = [normalize_segmentation_class_name(item[1]) for item in self.labels]
         self.mask_paths = sorted((self.root / "trainval").glob("*.mat"))
         self.image_root = Path(image_root) if image_root is not None else None
 
@@ -132,6 +177,42 @@ def segmentation_prompts(class_names: Iterable[str], template: str = "a photo of
     return [template.format(class_name=name) for name in class_names]
 
 
+def _get_hw(mapping: dict[str, int] | None, default: int) -> tuple[int, int]:
+    if not mapping:
+        return default, default
+    height = int(mapping.get("height", default))
+    width = int(mapping.get("width", default))
+    return height, width
+
+
+def transform_mask_like_image_processor(mask: Image.Image, image_processor: Any) -> Image.Image:
+    """Apply image-processor resize/center-crop geometry to a label mask."""
+
+    out = mask
+    if getattr(image_processor, "do_resize", False):
+        size = getattr(image_processor, "size", {}) or {}
+        width, height = out.size
+        if "shortest_edge" in size:
+            shortest = int(size["shortest_edge"])
+            if width <= height:
+                new_width = shortest
+                new_height = int(round(height * shortest / width))
+            else:
+                new_height = shortest
+                new_width = int(round(width * shortest / height))
+        else:
+            new_height, new_width = _get_hw(size, default=224)
+        out = out.resize((new_width, new_height), resample=Image.Resampling.NEAREST)
+
+    if getattr(image_processor, "do_center_crop", False):
+        crop_height, crop_width = _get_hw(getattr(image_processor, "crop_size", None), default=224)
+        width, height = out.size
+        left = max((width - crop_width) // 2, 0)
+        top = max((height - crop_height) // 2, 0)
+        out = out.crop((left, top, left + crop_width, top + crop_height))
+    return out
+
+
 def image_patch_profiles(model: torch.nn.Module, image_tokens: torch.Tensor) -> torch.Tensor:
     """Return normalized PAL-relative patch profiles shaped ``(B, P, K)``.
 
@@ -182,13 +263,20 @@ def patch_logits_to_label_mask(
     logits: torch.Tensor,
     output_size: tuple[int, int],
     label_offset: int = 1,
+    label_ids: Iterable[int] | None = None,
 ) -> torch.Tensor:
     """Upsample dense patch logits and convert argmax to dataset label ids."""
 
     if logits.dim() != 4:
         raise ValueError("logits must be shaped (B, C, H, W).")
     upsampled = F.interpolate(logits, size=output_size, mode="bilinear", align_corners=False)
-    return upsampled.argmax(dim=1).to(torch.long) + int(label_offset)
+    argmax = upsampled.argmax(dim=1).to(torch.long)
+    if label_ids is None:
+        return argmax + int(label_offset)
+    labels = torch.as_tensor([int(item) for item in label_ids], dtype=torch.long, device=argmax.device)
+    if labels.numel() != logits.shape[1]:
+        raise ValueError("label_ids length must match the number of logit classes.")
+    return labels[argmax]
 
 
 def update_intersections_unions(

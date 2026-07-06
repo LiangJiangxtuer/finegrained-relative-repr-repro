@@ -105,7 +105,7 @@ export PYTHONPATH=src
 PYTHONPATH=src $PY -m unittest discover -s tests -v
 ```
 
-最近记录结果：`Ran 26 tests ... OK`。
+最近记录结果：`Ran 47 tests in 0.183s ... OK`。
 
 ### 3.2 提取 COCO2014 train token cache
 
@@ -184,18 +184,64 @@ PYTHONPATH=src $PY scripts/evaluate_classification.py \
 
 已完成数据集：`STL10`, `CIFAR100`, `Caltech101`, `DTD`, `EuroSAT`。
 
-### 3.6 Segmentation smoke
+### 3.6 Segmentation 评测与诊断
 
-当前只完成了 VOC20 小样本 smoke，不是论文全量 segmentation 结果：
+VOC20 / Pascal Context / ADE20K full segmentation 均已跑完。旧 JSON 结果使用历史协议；当前正式 evaluator 已补显式协议选项，并已完成 corrected full rerun。VOC20 corrected 命令示例：
 
 ```bash
 PYTHONPATH=src $PY scripts/evaluate_segmentation.py \
   --dataset VOC20 \
   --checkpoint outputs/pal_k512_coco2014_full/checkpoint.pt \
-  --output outputs/pal_k512_coco2014_full/voc20_segmentation_smoke.json \
-  --batch-size 2 \
-  --limit 4
+  --output outputs/pal_k512_coco2014_full/voc20_segmentation_full.json \
+  --target-frame processor \
+  --batch-size 8 \
+  --local-files-only
 ```
+
+Pascal Context 需要使用 common-59 protocol：
+
+```bash
+PYTHONPATH=src $PY scripts/evaluate_segmentation.py \
+  --dataset Context \
+  --checkpoint outputs/pal_k512_coco2014_full/checkpoint.pt \
+  --output outputs/pal_k512_coco2014_full/context_segmentation_common59_processor_full.json \
+  --target-frame processor \
+  --context-protocol common59 \
+  --batch-size 8 \
+  --local-files-only
+```
+
+针对 segmentation 指标偏低，已新增轻量协议诊断：
+
+```bash
+PYTHONUNBUFFERED=1 PYTHONPATH=src $PY scripts/diagnose_segmentation_protocol.py \
+  --dataset ADE20K \
+  --checkpoint outputs/pal_k512_coco2014_full/checkpoint.pt \
+  --output outputs/diagnostics/ade20k_segmentation_protocol_probe.json \
+  --limit 16 \
+  --batch-size 4 \
+  --local-files-only \
+  --also-ignore-zero
+```
+
+诊断结论记录在 `docs/segmentation_debug_notes.md`。
+
+当前 16-sample corrected formal probes：
+
+| Dataset | Options | mIoU-fg |
+|---|---|---:|
+| VOC20 | `--target-frame processor` | 12.5179 |
+| Context | `--target-frame processor --context-protocol common59` | 12.3125 |
+| ADE20K | `--target-frame processor` | 0.2571 |
+
+Corrected full segmentation rerun 已完成：
+
+| Dataset | Corrected protocol | Samples | Corrected mIoU | Paper target | Relative |
+|---|---|---:|---:|---:|---:|
+| VOC20 | `--target-frame processor` | 1,449 | 20.58 | 32.30 | 63.71% |
+| Context | `--target-frame processor --context-protocol common59` | 10,103 | 11.23 | 25.50 | 44.05% |
+| ADE20K | `--target-frame processor` | 2,000 | 2.19 | 13.80 | 15.87% |
+| Average | - | - | 11.33 | 23.87 | 47.48% |
 
 ---
 
@@ -272,7 +318,7 @@ Prompt-template sweep best-of-4 后：
 | ADE20K | full validation | 2,000 | 1.47 | 13.80 | -12.33 | 10.67% | full evaluation 已完成，结果提示 protocol/debug gap 较大 |
 | **Average** | - | - | **5.61** | **23.87** | **-18.26** | **23.50%** | VOC20/Context/ADE20K 平均 |
 
-Segmentation 结果分析：三套 segmentation full run 均已跑通，证明 dense patch profile -> class prompt similarity -> mask upsample -> foreground mIoU 的完整路径可执行；但 VOC20/Context/ADE20K 平均 mIoU 只有 5.61 vs 论文平均 23.87。下一步重点不是“能否运行”，而是排查 segmentation prompt、背景类/ignore-index、mask resize、类别名、layer selection 与 paper foreground-mIoU 口径。
+Segmentation 结果分析：三套 segmentation full run 均已跑通，证明 dense patch profile -> class prompt similarity -> mask upsample -> foreground mIoU 的完整路径可执行；但旧 full-run JSON 使用了隐式 original-mask frame，且 Context 使用 all-459 protocol，因此这些数值现在应视为历史基线而非最终 paper-parity rows。正式 evaluator 已支持 `--target-frame processor` 和 Context `--context-protocol common59`；corrected full rerun 后，segmentation 平均 mIoU 从 `5.61` 提升到 `11.33`，达到论文平均 `23.87` 的 `47.48%`。VOC20 提升到 `20.58`，Context common-59 提升到 `11.23`，ADE20K 仅提升到 `2.19`，仍是主要 unresolved gap。
 
 ### 5.4 消融实验状态
 
@@ -299,8 +345,10 @@ Segmentation 结果分析：三套 segmentation full run 均已跑通，证明 d
 3. **Prompt template 只解释了部分差距**  
    Prompt sweep 已完成，mixed best template 平均 top-1 达到 46.09，较单模板提升 +1.40；Caltech101 / EuroSAT 有明显改善，但距离论文仍有差距。
 
-4. **Segmentation pipeline 已进入 full-val 阶段但仍有差距**  
-   VOC20 full-val mIoU 为 14.82 vs 论文 32.30；Context 正在运行，ADE20K 已排队。
+4. **Segmentation full-val 已完成，正式协议已修正并完成 corrected rerun**
+   VOC20 / Context / ADE20K historical full run 平均 mIoU 为 5.61 vs 论文 23.87，但这些 JSON 是历史协议结果。`scripts/evaluate_segmentation.py` 现在支持 `--target-frame {original,processor}` 和 `--context-protocol {all459,common59}`；16-sample corrected probe 显示 Context common-59 processor-frame 从旧 all-459 processor-frame `0.76` 提升到 `12.31`。详见 `docs/segmentation_debug_notes.md`。
+
+   Corrected full rerun 已完成：VOC20 `20.58`、Context `11.23`、ADE20K `2.19`、平均 `11.33`，较历史平均 `5.61` 提升 `+5.72`，但仍低于论文平均 `23.87`。
 
 5. **Baseline 和 ablation 尚未完成**  
    当前只比较 PAL 主模型 target row；若目标是完整复现论文所有表格，还需要实现或导入 CSA / LinearRS / MLPRS / SAIL / FA，并运行全部 ablation。
@@ -324,9 +372,9 @@ Segmentation 结果分析：三套 segmentation full run 均已跑通，证明 d
    - 优先排查 Caltech101 的 split 与 label mapping。
    - 输出每个数据集 per-class accuracy，定位主要失败类别。
 
-4. **完成 segmentation 主表**
-   - 先将 VOC20 从 4-sample smoke 扩展到 full val。
-   - 实现/验证 Pascal Context 与 ADE20K loader。
+4. **修正并复核 segmentation protocol**
+   - 正式 evaluator 已增加显式 `--target-frame {original,processor}`，避免 DINOv2 center-crop token 与原始 mask 直接比较。
+   - Pascal Context 已增加 `--context-protocol {all459,common59}`，paper-oriented corrected full rerun 已使用 common-59。
    - 对齐 foreground mIoU 口径、背景类处理、ignore label、mask resize。
 
 5. **运行主消融实验**
@@ -366,6 +414,9 @@ docs/
   full_reproduction_status.md
   continuation_handoff.md
   results_snapshot.md
+  pipeline_results_snapshot.md
+  segmentation_debug_notes.md
+  zh_experiment_design_results_analysis.md
 scripts/
   extract_coco_tokens.py
   extract_flickr30k_tokens.py
@@ -375,6 +426,7 @@ scripts/
   run_local_smoke.sh
   evaluate_classification.py
   evaluate_segmentation.py
+  diagnose_segmentation_protocol.py
 src/pal_repro/
 tests/
 ```
@@ -403,6 +455,19 @@ external/bridge-anchors/.git/
   - `outputs/pal_k512_coco2014_full/caltech101_classification.json`
   - `outputs/pal_k512_coco2014_full/dtd_classification.json`
   - `outputs/pal_k512_coco2014_full/eurosat_classification.json`
-- Segmentation smoke：`outputs/pal_k512_coco2014_full/voc20_segmentation_smoke.json`
+- Segmentation full run：
+  - `outputs/pal_k512_coco2014_full/voc20_segmentation_full.json`
+  - `outputs/pal_k512_coco2014_full/context_segmentation_full.json`
+  - `outputs/pal_k512_coco2014_full/ade20k_segmentation_full.json`
+- Corrected segmentation full run：
+  - `outputs/pal_k512_coco2014_full/voc20_segmentation_processor_full.json`
+  - `outputs/pal_k512_coco2014_full/context_segmentation_common59_processor_full.json`
+  - `outputs/pal_k512_coco2014_full/ade20k_segmentation_processor_full.json`
+- Segmentation debug probes：`outputs/diagnostics/*_segmentation_protocol_probe*.json`
+- Corrected formal segmentation probes：
+  - `outputs/diagnostics/voc20_processor_segmentation_probe_eval.json`
+  - `outputs/diagnostics/context_common59_processor_segmentation_probe_eval.json`
+  - `outputs/diagnostics/ade20k_processor_segmentation_probe_eval.json`
+- Segmentation debug notes：`docs/segmentation_debug_notes.md`
 - 已整理结果快照：`docs/results_snapshot.md`
 - 续接上下文：`docs/continuation_handoff.md`

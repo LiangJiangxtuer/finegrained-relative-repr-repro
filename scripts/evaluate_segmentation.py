@@ -29,6 +29,7 @@ from pal_repro.segmentation import (
     image_patch_profiles,
     patch_logits_to_label_mask,
     segmentation_prompts,
+    transform_mask_like_image_processor,
     update_intersections_unions,
 )
 
@@ -44,12 +45,12 @@ def collate_pil_masks(batch):
     return list(images), list(masks)
 
 
-def load_dataset(name: str, root: Path):
+def load_dataset(name: str, root: Path, context_protocol: str = "all459"):
     if name == "VOC20":
         ds = datasets.VOCSegmentation(root=str(root), year="2012", image_set="val", download=False)
         return ds, VOC_CLASS_NAMES, list(range(1, 21)), 255, "val"
     if name == "Context":
-        ds = PascalContextSegmentationDataset(root)
+        ds = PascalContextSegmentationDataset(root, protocol=context_protocol)
         return ds, ds.class_names, ds.class_ids, None, "trainval"
     if name == "ADE20K":
         ds = ADE20KSegmentationDataset(root)
@@ -83,7 +84,11 @@ def evaluate_dataset(args: argparse.Namespace) -> dict[str, Any]:
 
     device = torch.device(args.device if args.device != "auto" else ("cuda" if torch.cuda.is_available() else "cpu"))
     root = args.root or DEFAULT_ROOTS[args.dataset]
-    dataset, class_names, class_ids, ignore_index, split = load_dataset(args.dataset, root)
+    dataset, class_names, class_ids, ignore_index, split = load_dataset(
+        args.dataset,
+        root,
+        context_protocol=args.context_protocol,
+    )
     if args.limit is not None:
         dataset = torch.utils.data.Subset(dataset, list(range(min(args.limit, len(dataset)))))
     loader = DataLoader(
@@ -119,11 +124,13 @@ def evaluate_dataset(args: argparse.Namespace) -> dict[str, Any]:
         patch_profiles = image_patch_profiles(pal_model, image_outputs.last_hidden_state.float())
         logits = dense_patch_logits(patch_profiles, class_profiles)
         for index, mask in enumerate(masks):
+            if args.target_frame == "processor":
+                mask = transform_mask_like_image_processor(mask, image_processor)
             target = torch.as_tensor(np.array(mask), dtype=torch.long)
             pred = patch_logits_to_label_mask(
                 logits[index:index + 1].detach().cpu(),
                 output_size=tuple(target.shape),
-                label_offset=1,
+                label_ids=class_ids,
             )[0]
             update_intersections_unions(
                 intersections,
@@ -154,6 +161,8 @@ def evaluate_dataset(args: argparse.Namespace) -> dict[str, Any]:
         "text_model": args.text_model,
         "num_samples": len(dataset),
         "num_classes": len(class_names),
+        "context_protocol": args.context_protocol if args.dataset == "Context" else None,
+        "target_frame": args.target_frame,
         "prompt_template": args.prompt_template,
         "prompts": prompts,
         "batch_size": args.batch_size,
@@ -181,6 +190,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--max-text-length", type=int, default=32)
     parser.add_argument("--prompt-template", default="a photo of {class_name}")
+    parser.add_argument("--target-frame", choices=["original", "processor"], default="original")
+    parser.add_argument("--context-protocol", choices=["all459", "common59"], default="all459")
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--local-files-only", action="store_true")

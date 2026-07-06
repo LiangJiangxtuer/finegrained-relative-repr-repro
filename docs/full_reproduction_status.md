@@ -44,7 +44,7 @@ The target is not a smoke demo. The reproduction target is now the complete pape
   - `scripts/run_prompt_sweep.py`
   - `scripts/analyze_anchor_overlap.py`
   - `scripts/write_baseline_tracking_report.py`
-- Added segmentation loaders for Pascal Context and ADE20K metadata-backed evaluation.
+- Added segmentation loaders for Pascal Context and ADE20K metadata-backed evaluation, plus explicit dense-eval protocol flags for processor-frame scoring and Pascal Context common-59 vs all-459 evaluation.
 - Added token-usage ablation support via `pooling_mode={cap,mean,global}`.
 
 ## Verification evidence
@@ -58,7 +58,7 @@ PYTHONPATH=src /home/hnxxzy/miniconda3/envs/ovvs/bin/python -m unittest discover
 Result:
 
 ```text
-Ran 42 tests in 1.371s
+Ran 47 tests in 0.183s
 OK
 ```
 
@@ -227,6 +227,28 @@ anchor overlap: matched 0.517633 vs mismatched 0.436705
 ```
 
 Full pipeline summary: `docs/pipeline_results_snapshot.md`.
+
+Segmentation protocol debug and formal evaluator update are complete:
+
+```text
+script: scripts/diagnose_segmentation_protocol.py
+notes: docs/segmentation_debug_notes.md
+probe outputs: outputs/diagnostics/*_segmentation_protocol_probe*.json
+formal evaluator: scripts/evaluate_segmentation.py --target-frame {original,processor} --context-protocol {all459,common59}
+corrected probes: VOC20 processor 12.5179; Context common59 processor 12.3125; ADE20K processor 0.2571
+finding: DINOv2 image preprocessing uses resize-shortest-edge 256 plus 224x224 center crop; the old full segmentation metrics scored against original masks and Context used all 459 labels. Context common59 + processor-frame scoring fixes a major protocol mismatch; ADE20K remains an active prompt/name/layer-selection suspect.
+```
+
+Corrected full segmentation rerun completed normally:
+
+```text
+process: proc_a795405ceceb, exit_code=0
+log: outputs/logs/corrected_segmentation_rerun_20260705_104725.log
+VOC20 corrected:   outputs/pal_k512_coco2014_full/voc20_segmentation_processor_full.json, mIoU 20.58 vs paper 32.30
+Context corrected: outputs/pal_k512_coco2014_full/context_segmentation_common59_processor_full.json, mIoU 11.23 vs paper 25.50
+ADE20K corrected:  outputs/pal_k512_coco2014_full/ade20k_segmentation_processor_full.json, mIoU 2.19 vs paper 13.80
+Corrected average: 11.33 vs paper 23.87; historical average was 5.61
+```
 Flickr30k local 1K multi-caption retrieval has also been evaluated from `/home/hnxxzy/Downloads/Flickr30k.zip`:
 
 ```text
@@ -256,6 +278,6 @@ Full machine-readable results are summarized in `docs/results_snapshot.md`.
 
 - Run downstream retrieval/classification/segmentation metrics for the K, `tau_p`, and token-usage ablation checkpoints; current sweep outputs are training-loss-only.
 - If desired, expand the CKA proxy sweep into full layer-specific token extraction/training/evaluation.
-- Debug dense segmentation protocol, especially Context/ADE20K, which are now runnable but far below paper.
+- Continue dense segmentation debugging from the corrected full rerun: VOC20 `20.58`, Context `11.23`, ADE20K `2.19`, average `11.33` vs paper `23.87`. Prioritize ADE20K prompt/name/layer debugging and Context dense-token layer/prompt ensemble work.
 - Produce anchor-overlap and qualitative attention visualizations.
 - Implement/run baseline methods if reproducing every comparison row, not just PAL target rows.
