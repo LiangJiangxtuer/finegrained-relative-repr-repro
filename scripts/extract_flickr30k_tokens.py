@@ -127,6 +127,17 @@ def flush_chunk(
     }
 
 
+def select_hidden_state(outputs: Any, layer: int | None) -> torch.Tensor:
+    """Return last_hidden_state or a requested hidden-state layer."""
+
+    if layer is None:
+        return outputs.last_hidden_state
+    hidden_states = outputs.hidden_states
+    if hidden_states is None:
+        raise ValueError("Model output did not include hidden_states; pass output_hidden_states=True.")
+    return hidden_states[layer]
+
+
 def _load_images_from_zip(zf: zipfile.ZipFile, batch: list[dict[str, Any]]) -> list[Image.Image]:
     images: list[Image.Image] = []
     for row in batch:
@@ -177,14 +188,20 @@ def extract_tokens(args: argparse.Namespace) -> dict[str, Any]:
                 truncation=True,
                 max_length=args.max_text_length,
             ).to(device)
-            text_outputs = text_model(**text_inputs)
-            text_parts.append(text_outputs.last_hidden_state.detach().cpu().to(dtype=dtype))
+            text_outputs = text_model(
+                **text_inputs,
+                output_hidden_states=args.text_layer is not None,
+            )
+            text_parts.append(select_hidden_state(text_outputs, args.text_layer).detach().cpu().to(dtype=dtype))
             mask_parts.append(text_inputs["attention_mask"].detach().cpu().bool())
 
             images = _load_images_from_zip(zf, batch)
             image_inputs = image_processor(images=images, return_tensors="pt").to(device)
-            image_outputs = vision_model(**image_inputs)
-            image_parts.append(image_outputs.last_hidden_state.detach().cpu().to(dtype=dtype))
+            image_outputs = vision_model(
+                **image_inputs,
+                output_hidden_states=args.vision_layer is not None,
+            )
+            image_parts.append(select_hidden_state(image_outputs, args.vision_layer).detach().cpu().to(dtype=dtype))
 
             samples_in_buffer += len(batch)
             processed = min(start + len(batch), len(pairs))
@@ -210,6 +227,8 @@ def extract_tokens(args: argparse.Namespace) -> dict[str, Any]:
         "image_prefix": args.image_prefix,
         "vision_model": args.vision_model,
         "text_model": args.text_model,
+        "vision_layer": args.vision_layer,
+        "text_layer": args.text_layer,
         "caption_policy": args.caption_policy,
         "num_pairs": len(pairs),
         "num_images": len({row["image_id"] for row in pairs}),
@@ -233,6 +252,8 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--seed", type=int, default=42)
     parser.add_argument("--vision-model", default="facebook/dinov2-large")
     parser.add_argument("--text-model", default="roberta-large")
+    parser.add_argument("--vision-layer", type=int, default=None)
+    parser.add_argument("--text-layer", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=8)
     parser.add_argument("--chunk-size", type=int, default=2048)
     parser.add_argument("--max-text-length", type=int, default=64)

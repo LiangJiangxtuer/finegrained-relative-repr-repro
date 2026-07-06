@@ -16,7 +16,9 @@ from pal_repro.segmentation import (  # noqa: E402
     PASCAL_CONTEXT_59_CLASS_NAMES,
     PascalContextSegmentationDataset,
     VOC_CLASS_NAMES,
+    build_segmentation_prompt_groups,
     foreground_miou_from_intersections_unions,
+    parse_ade20k_object_aliases,
     parse_ade20k_object_info,
     parse_pascal_context_labels,
     patch_logits_to_label_mask,
@@ -143,6 +145,37 @@ class TestSegmentationSupport(unittest.TestCase):
 
         self.assertEqual(labels, [(1, "wall"), (2, "building")])
 
+    def test_parse_ade20k_object_aliases_keeps_all_prompt_synonyms(self) -> None:
+        rows = [
+            "Idx\tRatio\tTrain\tVal\tName",
+            "2\t0.1\t10\t1\tbuilding, edifice",
+            "3\t0.1\t10\t1\trug, carpet, carpeting",
+        ]
+
+        aliases = parse_ade20k_object_aliases(rows)
+
+        self.assertEqual(aliases[0], (2, ["building", "edifice"]))
+        self.assertEqual(aliases[1], (3, ["rug", "carpet", "carpeting"]))
+
+    def test_build_segmentation_prompt_groups_combines_aliases_and_templates(self) -> None:
+        groups = build_segmentation_prompt_groups(
+            [["building", "edifice"], ["rug"]],
+            templates=["a photo of {class_name}", "a clean photo of {class_name}"],
+        )
+
+        self.assertEqual(
+            groups,
+            [
+                [
+                    "a photo of building",
+                    "a clean photo of building",
+                    "a photo of edifice",
+                    "a clean photo of edifice",
+                ],
+                ["a photo of rug", "a clean photo of rug"],
+            ],
+        )
+
     def test_segmentation_dataset_roots_expose_class_ids_from_metadata(self) -> None:
         import tempfile
 
@@ -189,6 +222,25 @@ class TestSegmentationSupport(unittest.TestCase):
         transformed = transform_mask_like_image_processor(mask, processor)
 
         self.assertEqual(np.asarray(transformed).tolist(), [[12, 13], [22, 23]])
+
+    def test_evaluate_segmentation_parser_accepts_layer_and_prompt_ensemble_flags(self) -> None:
+        args = build_parser().parse_args(
+            [
+                "--dataset", "ADE20K",
+                "--checkpoint", "checkpoint.pt",
+                "--output", "out.json",
+                "--vision-layer", "-2",
+                "--text-layer", "-6",
+                "--alias-policy", "all",
+                "--prompt-template", "a photo of {class_name}",
+                "--prompt-template", "a clean photo of {class_name}",
+            ]
+        )
+
+        self.assertEqual(args.vision_layer, -2)
+        self.assertEqual(args.text_layer, -6)
+        self.assertEqual(args.alias_policy, "all")
+        self.assertEqual(args.prompt_template, ["a photo of {class_name}", "a clean photo of {class_name}"])
 
 
 if __name__ == "__main__":

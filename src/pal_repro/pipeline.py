@@ -17,6 +17,8 @@ class PipelineStep:
     description: str = ""
     gpu: bool = False
     long_running: bool = False
+    log: Path | None = None
+    resume_policy: str = "skip_if_output_exists"
 
 
 @dataclass(frozen=True)
@@ -33,6 +35,11 @@ class PipelineConfig:
     train_batch_size: int = 128
     train_epochs: int = 20
     train_size: int = 82783
+    vision_layer: int | None = None
+    text_layer: int | None = None
+    cka_limit_images: int = 1024
+    cka_top_k: int = 3
+    cka_layers: tuple[int, ...] = (-1, -2, -4, -6, -8, -10, -12, -16, -20, -24)
     prompt_templates: tuple[str, ...] = field(
         default=(
             "a photo of {class_name}",
@@ -58,6 +65,15 @@ def _py(config: PipelineConfig, *parts: str | Path) -> list[str]:
 
 def _module(config: PipelineConfig, module: str, *args: str | Path) -> list[str]:
     return [str(config.python), "-m", module, *[str(arg) for arg in args]]
+
+
+def _layer_args(config: PipelineConfig) -> list[str]:
+    args: list[str] = []
+    if config.vision_layer is not None:
+        args.extend(["--vision-layer", str(config.vision_layer)])
+    if config.text_layer is not None:
+        args.extend(["--text-layer", str(config.text_layer)])
+    return args
 
 
 def build_pipeline_steps(config: PipelineConfig) -> list[PipelineStep]:
@@ -99,6 +115,7 @@ def build_pipeline_steps(config: PipelineConfig) -> list[PipelineStep]:
                 "--caption-policy", "all",
                 "--batch-size", str(config.batch_size_extract),
                 "--chunk-size", "2048",
+                *_layer_args(config),
                 "--local-files-only",
             ),
             output=coco_official_tokens / "metadata.json",
@@ -136,6 +153,7 @@ def build_pipeline_steps(config: PipelineConfig) -> list[PipelineStep]:
                 "--caption-policy", "all",
                 "--batch-size", str(config.batch_size_extract),
                 "--chunk-size", "2048",
+                *_layer_args(config),
                 "--local-files-only",
             ),
             output=flickr_official_tokens / "metadata.json",
@@ -170,28 +188,33 @@ def build_pipeline_steps(config: PipelineConfig) -> list[PipelineStep]:
                 "--split", "test",
                 "--coco-root", config.coco_root,
                 "--caption-policy", "first",
-                "--limit-images", "128",
+                "--limit-images", str(config.cka_limit_images),
+                "--top-k", str(config.cka_top_k),
+                *sum((["--vision-layer", str(layer)] for layer in config.cka_layers), []),
+                *sum((["--text-layer", str(layer)] for layer in config.cka_layers), []),
                 "--output", root / "outputs/cka/coco_karpathy_layer_sweep.json",
                 "--local-files-only",
             ),
             output=root / "outputs/cka/coco_karpathy_layer_sweep.json",
-            description="Run a CKA proxy sweep to rank DINOv2/RoBERTa layer pairs before full layer-specific retraining.",
+            description="Run 1024-pair CKA layer grid to rank DINOv2/RoBERTa layer pairs before proxy retraining.",
             gpu=True,
             long_running=True,
         ),
         PipelineStep(
-            name="prompt_sweep_classification",
+            name="classification_prompt_ensemble",
             priority=60,
             command=_py(
                 config,
                 root / "scripts/run_prompt_sweep.py",
                 "--checkpoint", checkpoint,
-                "--output-dir", root / "outputs/prompt_sweep/classification",
+                "--output-dir", root / "outputs/classification_prompt_ensemble",
                 "--batch-size", "64",
+                "--ensemble",
                 *sum((["--template", template] for template in config.prompt_templates), []),
+                *_layer_args(config),
             ),
-            output=root / "outputs/prompt_sweep/classification/summary.json",
-            description="Run classification prompt-template sweep.",
+            output=root / "outputs/classification_prompt_ensemble/summary.json",
+            description="Run fixed fair classification prompt ensemble.",
             gpu=True,
             long_running=True,
         ),
@@ -203,11 +226,13 @@ def build_pipeline_steps(config: PipelineConfig) -> list[PipelineStep]:
                 root / "scripts/evaluate_segmentation.py",
                 "--dataset", "VOC20",
                 "--checkpoint", checkpoint,
-                "--output", root / "outputs/pal_k512_coco2014_full/voc20_segmentation_full.json",
+                "--output", root / "outputs/pal_k512_coco2014_full/voc20_segmentation_processor_full.json",
                 "--batch-size", "8",
+                "--target-frame", "processor",
+                *_layer_args(config),
                 "--local-files-only",
             ),
-            output=root / "outputs/pal_k512_coco2014_full/voc20_segmentation_full.json",
+            output=root / "outputs/pal_k512_coco2014_full/voc20_segmentation_processor_full.json",
             description="Run full VOC20 foreground-mIoU evaluation.",
             gpu=True,
             long_running=True,
@@ -220,11 +245,14 @@ def build_pipeline_steps(config: PipelineConfig) -> list[PipelineStep]:
                 root / "scripts/evaluate_segmentation.py",
                 "--dataset", "Context",
                 "--checkpoint", checkpoint,
-                "--output", root / "outputs/pal_k512_coco2014_full/context_segmentation_full.json",
+                "--output", root / "outputs/pal_k512_coco2014_full/context_segmentation_common59_processor_full.json",
                 "--batch-size", "8",
+                "--target-frame", "processor",
+                "--context-protocol", "common59",
+                *_layer_args(config),
                 "--local-files-only",
             ),
-            output=root / "outputs/pal_k512_coco2014_full/context_segmentation_full.json",
+            output=root / "outputs/pal_k512_coco2014_full/context_segmentation_common59_processor_full.json",
             description="Run Pascal Context foreground-mIoU evaluation.",
             gpu=True,
             long_running=True,
@@ -237,11 +265,14 @@ def build_pipeline_steps(config: PipelineConfig) -> list[PipelineStep]:
                 root / "scripts/evaluate_segmentation.py",
                 "--dataset", "ADE20K",
                 "--checkpoint", checkpoint,
-                "--output", root / "outputs/pal_k512_coco2014_full/ade20k_segmentation_full.json",
+                "--output", root / "outputs/pal_k512_coco2014_full/ade20k_segmentation_processor_full.json",
                 "--batch-size", "8",
+                "--target-frame", "processor",
+                "--alias-policy", "all",
+                *_layer_args(config),
                 "--local-files-only",
             ),
-            output=root / "outputs/pal_k512_coco2014_full/ade20k_segmentation_full.json",
+            output=root / "outputs/pal_k512_coco2014_full/ade20k_segmentation_processor_full.json",
             description="Run ADE20K foreground-mIoU evaluation.",
             gpu=True,
             long_running=True,

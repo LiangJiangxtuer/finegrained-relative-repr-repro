@@ -5,6 +5,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import sys
 import zipfile
 from collections import defaultdict
 from pathlib import Path
@@ -15,12 +16,45 @@ import torch
 from extract_karpathy_retrieval_tokens import _load_images, build_karpathy_pairs
 from pal_repro.cka import rank_layer_pairs
 
+DEFAULT_LAYER_GRID = [-1, -2, -4, -6, -8, -10, -12, -16, -20, -24]
+BASELINE_LAYER_PAIR = (-1, -1)
+
 
 def _masked_mean(hidden: torch.Tensor, mask: torch.Tensor | None = None) -> torch.Tensor:
     if mask is None:
         return hidden.mean(dim=1)
     weights = mask.to(hidden.device, dtype=hidden.dtype).unsqueeze(-1)
     return (hidden * weights).sum(dim=1) / weights.sum(dim=1).clamp_min(1.0)
+
+
+def finalize_args(args: argparse.Namespace) -> argparse.Namespace:
+    if not args.vision_layer:
+        args.vision_layer = list(DEFAULT_LAYER_GRID)
+    if not args.text_layer:
+        args.text_layer = list(DEFAULT_LAYER_GRID)
+    return args
+
+
+def select_candidate_layer_pairs(
+    ranked: list[dict[str, Any]],
+    top_k: int,
+    baseline: tuple[int, int] = BASELINE_LAYER_PAIR,
+) -> list[dict[str, Any]]:
+    selected: list[dict[str, Any]] = [
+        {**row, "selection_reason": "top_cka"} for row in ranked[: max(top_k, 0)]
+    ]
+    selected_keys = {(row["vision_layer"], row["text_layer"]) for row in selected}
+    if baseline not in selected_keys:
+        baseline_row = next(
+            (
+                row for row in ranked
+                if (row["vision_layer"], row["text_layer"]) == baseline
+            ),
+            None,
+        )
+        if baseline_row is not None:
+            selected.append({**baseline_row, "selection_reason": "final_layer_baseline"})
+    return selected
 
 
 @torch.no_grad()
@@ -73,6 +107,7 @@ def run_layer_sweep(args: argparse.Namespace) -> dict[str, Any]:
     vision_layers = {layer: torch.cat(parts, dim=0) for layer, parts in vision_acc.items()}
     text_layers = {layer: torch.cat(parts, dim=0) for layer, parts in text_acc.items()}
     ranked = rank_layer_pairs(vision_layers, text_layers)
+    candidate_layer_pairs = select_candidate_layer_pairs(ranked, top_k=args.top_k)
     result = {
         "dataset": args.dataset,
         "split": args.split,
@@ -84,7 +119,18 @@ def run_layer_sweep(args: argparse.Namespace) -> dict[str, Any]:
         "vision_layers": args.vision_layer,
         "text_layers": args.text_layer,
         "ranking": ranked,
+        "top_k": ranked[: args.top_k],
+        "candidate_layer_pairs": candidate_layer_pairs,
         "best": ranked[0] if ranked else None,
+        "protocol": {
+            "source_paper_claim": "Paper states encoder layers are selected using CKA, but exact layer indices are not disclosed.",
+            "local_command": " ".join(sys.argv),
+            "encoder_layers": {"vision_layers": args.vision_layer, "text_layers": args.text_layer},
+            "dataset_split": args.split,
+            "prompt_policy": {"caption_policy": args.caption_policy},
+            "known_deviation": "This step ranks pooled hidden states only; downstream 10K proxy training and full 80K retraining are separate stages.",
+            "verification_status": "implemented",
+        },
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
@@ -100,9 +146,10 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--coco-root", type=Path, default=None)
     parser.add_argument("--flickr-zip", type=Path, default=None)
     parser.add_argument("--caption-policy", choices=["first", "all"], default="first")
-    parser.add_argument("--limit-images", type=int, default=128)
+    parser.add_argument("--limit-images", type=int, default=1024)
     parser.add_argument("--vision-layer", action="append", type=int, default=[])
     parser.add_argument("--text-layer", action="append", type=int, default=[])
+    parser.add_argument("--top-k", type=int, default=3)
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--vision-model", default="facebook/dinov2-large")
     parser.add_argument("--text-model", default="roberta-large")
@@ -114,11 +161,7 @@ def build_parser() -> argparse.ArgumentParser:
 
 
 def main() -> int:
-    args = build_parser().parse_args()
-    if not args.vision_layer:
-        args.vision_layer = [-1, -2, -6, -12]
-    if not args.text_layer:
-        args.text_layer = [-1, -2, -6, -12]
+    args = finalize_args(build_parser().parse_args())
     run_layer_sweep(args)
     return 0
 

@@ -66,7 +66,10 @@ class TestKarpathyRetrievalPairs(unittest.TestCase):
         self.assertEqual(len(rows), 2)
         self.assertEqual({row["image_id"] for row in rows}, {42})
         self.assertEqual([row["caption_index"] for row in rows], [0, 1])
-        self.assertTrue(rows[0]["image_path"].endswith("val2014/COCO_val2014_000000000042.jpg"))
+        self.assertEqual(
+            Path(rows[0]["image_path"]).parts[-2:],
+            ("val2014", "COCO_val2014_000000000042.jpg"),
+        )
         self.assertEqual(rows[0]["karpathy_split"], "test")
         self.assertEqual(rows[0]["caption_policy"], "all")
 

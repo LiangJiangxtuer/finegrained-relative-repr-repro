@@ -18,7 +18,12 @@ import torch.nn.functional as F
 from torch.utils.data import DataLoader
 from torchvision import datasets
 
-from pal_repro.classification import build_class_prompts, classification_topk
+from pal_repro.classification import (
+    build_class_prompt_groups,
+    build_class_prompts,
+    classification_topk,
+    per_class_accuracy,
+)
 from pal_repro.evaluate import load_trained_pal_model
 
 DEFAULT_ROOTS = {
@@ -74,6 +79,50 @@ def encode_class_texts(
     return pal_model.encode_text(outputs.last_hidden_state.float(), inputs["attention_mask"].bool()).detach().cpu()
 
 
+def select_hidden_state(outputs: Any, layer: int | None) -> torch.Tensor:
+    """Return last_hidden_state or a requested hidden-state layer."""
+
+    if layer is None:
+        return outputs.last_hidden_state
+    hidden_states = outputs.hidden_states
+    if hidden_states is None:
+        raise ValueError("Model output did not include hidden_states; pass output_hidden_states=True.")
+    return hidden_states[layer]
+
+
+@torch.no_grad()
+def encode_class_prompt_groups(
+    pal_model,
+    tokenizer,
+    text_model,
+    prompt_groups: list[list[str]],
+    device: torch.device,
+    max_length: int,
+    text_layer: int | None,
+) -> torch.Tensor:
+    flat_prompts = [prompt for group in prompt_groups for prompt in group]
+    inputs = tokenizer(
+        flat_prompts,
+        return_tensors="pt",
+        padding="max_length",
+        truncation=True,
+        max_length=max_length,
+    ).to(device)
+    outputs = text_model(**inputs, output_hidden_states=text_layer is not None)
+    text_tokens = select_hidden_state(outputs, text_layer).float()
+    flat_features = F.normalize(
+        pal_model.encode_text(text_tokens, inputs["attention_mask"].bool()).detach().cpu(),
+        dim=-1,
+    )
+    grouped: list[torch.Tensor] = []
+    offset = 0
+    for group in prompt_groups:
+        width = len(group)
+        grouped.append(F.normalize(flat_features[offset:offset + width].mean(dim=0), dim=0))
+        offset += width
+    return torch.stack(grouped, dim=0)
+
+
 @torch.no_grad()
 def evaluate_dataset(args: argparse.Namespace) -> dict[str, Any]:
     from transformers import AutoImageProcessor, AutoModel, AutoTokenizer
@@ -98,14 +147,17 @@ def evaluate_dataset(args: argparse.Namespace) -> dict[str, Any]:
     image_processor = AutoImageProcessor.from_pretrained(args.vision_model, local_files_only=args.local_files_only)
     vision_model = AutoModel.from_pretrained(args.vision_model, local_files_only=args.local_files_only).to(device).eval()
 
-    prompts = build_class_prompts(class_names, template=args.prompt_template)
-    class_features = encode_class_texts(
+    templates = args.prompt_template or ["a photo of {class_name}"]
+    prompt_groups = build_class_prompt_groups(class_names, templates=templates)
+    prompts = [prompt for group in prompt_groups for prompt in group]
+    class_features = encode_class_prompt_groups(
         pal_model,
         tokenizer,
         text_model,
-        prompts,
+        prompt_groups,
         device=device,
         max_length=args.max_text_length,
+        text_layer=args.text_layer,
     )
     class_features = F.normalize(class_features, dim=-1)
 
@@ -114,8 +166,9 @@ def evaluate_dataset(args: argparse.Namespace) -> dict[str, Any]:
     processed = 0
     for images, batch_labels in loader:
         image_inputs = image_processor(images=images, return_tensors="pt").to(device)
-        image_outputs = vision_model(**image_inputs)
-        image_features = pal_model.encode_image(image_outputs.last_hidden_state.float()).detach().cpu()
+        image_outputs = vision_model(**image_inputs, output_hidden_states=args.vision_layer is not None)
+        image_tokens = select_hidden_state(image_outputs, args.vision_layer).float()
+        image_features = pal_model.encode_image(image_tokens).detach().cpu()
         similarity = F.normalize(image_features, dim=-1) @ class_features.T
         pred_scores.append(similarity)
         labels.append(batch_labels.cpu())
@@ -125,6 +178,7 @@ def evaluate_dataset(args: argparse.Namespace) -> dict[str, Any]:
     similarity_all = torch.cat(pred_scores, dim=0)
     labels_all = torch.cat(labels, dim=0)
     metrics = classification_topk(similarity_all, labels_all, ks=(1, 5))
+    class_accuracy = per_class_accuracy(similarity_all, labels_all, class_names)
     result: dict[str, Any] = {
         "dataset": args.dataset,
         "split": split,
@@ -132,13 +186,26 @@ def evaluate_dataset(args: argparse.Namespace) -> dict[str, Any]:
         "checkpoint": str(args.checkpoint),
         "vision_model": args.vision_model,
         "text_model": args.text_model,
+        "vision_layer": args.vision_layer,
+        "text_layer": args.text_layer,
         "num_samples": int(labels_all.shape[0]),
         "num_classes": len(class_names),
-        "prompt_template": args.prompt_template,
+        "prompt_template": templates[0] if len(templates) == 1 else None,
+        "prompt_templates": templates,
+        "prompt_groups": prompt_groups,
         "prompts": prompts,
         "batch_size": args.batch_size,
         "device": str(device),
         "metrics": metrics,
+        "per_class_accuracy": class_accuracy,
+        "protocol": {
+            "source_paper_claim": "Table 2 zero-shot classification top-1",
+            "encoder_layers": {"vision_layer": args.vision_layer, "text_layer": args.text_layer},
+            "dataset_split": split,
+            "prompt_policy": {"templates": templates, "aggregation": "normalized_mean_per_class"},
+            "known_deviation": [],
+            "verification_status": "ANALYZED",
+        },
     }
     args.output.parent.mkdir(parents=True, exist_ok=True)
     args.output.write_text(json.dumps(result, indent=2, sort_keys=True), encoding="utf-8")
@@ -153,10 +220,12 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--output", type=Path, required=True)
     parser.add_argument("--vision-model", default="facebook/dinov2-large")
     parser.add_argument("--text-model", default="roberta-large")
+    parser.add_argument("--vision-layer", type=int, default=None)
+    parser.add_argument("--text-layer", type=int, default=None)
     parser.add_argument("--batch-size", type=int, default=64)
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--max-text-length", type=int, default=32)
-    parser.add_argument("--prompt-template", default="a photo of {class_name}")
+    parser.add_argument("--prompt-template", action="append", default=None)
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--local-files-only", action="store_true")

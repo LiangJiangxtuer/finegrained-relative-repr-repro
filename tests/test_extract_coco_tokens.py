@@ -21,6 +21,40 @@ def load_extract_module():
 
 
 class TestCocoTokenExtractionPairs(unittest.TestCase):
+    def test_select_hidden_state_uses_requested_layer_or_last_hidden_state(self) -> None:
+        module = load_extract_module()
+        import torch
+        from types import SimpleNamespace
+
+        outputs = SimpleNamespace(
+            last_hidden_state=torch.tensor([[[9.0]]]),
+            hidden_states=(
+                torch.tensor([[[1.0]]]),
+                torch.tensor([[[2.0]]]),
+                torch.tensor([[[3.0]]]),
+            ),
+        )
+
+        self.assertEqual(module.select_hidden_state(outputs, None).item(), 9.0)
+        self.assertEqual(module.select_hidden_state(outputs, -2).item(), 2.0)
+        self.assertEqual(module.select_hidden_state(outputs, 1).item(), 2.0)
+
+    def test_parser_records_layer_selection_flags(self) -> None:
+        module = load_extract_module()
+
+        args = module.build_parser().parse_args(
+            [
+                "--captions-json", "captions.json",
+                "--image-dir", "images",
+                "--output-dir", "tokens",
+                "--vision-layer", "-2",
+                "--text-layer", "-6",
+            ]
+        )
+
+        self.assertEqual(args.vision_layer, -2)
+        self.assertEqual(args.text_layer, -6)
+
     def test_build_pairs_all_caption_policy_keeps_every_caption_for_selected_images(self) -> None:
         module = load_extract_module()
         with tempfile.TemporaryDirectory() as tmp:
