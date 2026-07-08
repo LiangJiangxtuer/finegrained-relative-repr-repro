@@ -1,6 +1,6 @@
 # Ordered Pipeline Results Snapshot
 
-Updated: 2026-07-04 15:20:43 EDT
+Updated: 2026-07-06
 
 This file summarizes the completed ordered reproduction pipeline launched via:
 
@@ -83,7 +83,7 @@ Outputs:
 
 ## K sweep
 
-The current K sweep records training convergence only; downstream paper metrics per K still need to be run before claiming ablation-table parity.
+The K sweep now has training convergence, downstream retrieval, full classification, corrected 64-sample segmentation probe metrics, and a selected full corrected K=256 segmentation rerun.
 
 | K | Final train loss | Train size | Eval size |
 |---:|---:|---:|---:|
@@ -93,11 +93,11 @@ The current K sweep records training convergence only; downstream paper metrics 
 | 256 | 0.303722 | 82,783 | 0 |
 | 512 | 0.283415 | 82,783 | 0 |
 
-Loss decreases monotonically as K increases.
+Retrieval Avg R@1 over COCO/Flickr Karpathy I2T/T2I also increases monotonically: K32 `35.94`, K64 `41.50`, K128 `46.27`, K256 `49.68`, K512 `51.05`. Full classification Avg top1 similarly increases from K32 `38.20` to K512 `45.63`. The 64-sample segmentation probe peaks at K256 `17.17` Avg mIoU, and selected full corrected K=256 segmentation reaches VOC20 `33.48`, Context `20.32`, ADE20K `5.89`, average `19.90`.
 
 ## `tau_p` sweep
 
-The current `tau_p` sweep records training convergence only; downstream metrics per temperature still need to be run for paper-table parity.
+The `tau_p` sweep now has training convergence, downstream retrieval, full classification, corrected 64-sample segmentation probe metrics, and a selected full corrected `tau_p=0.07` segmentation rerun.
 
 | `tau_p` | Final train loss |
 |---:|---:|
@@ -107,11 +107,11 @@ The current `tau_p` sweep records training convergence only; downstream metrics 
 | 0.07 | 0.371047 |
 | 0.10 | 0.407706 |
 
-Lower `tau_p` gives lower training loss in this run, but retrieval/classification/segmentation metrics are required before selecting a paper-grade temperature.
+Retrieval Avg R@1 over COCO/Flickr Karpathy I2T/T2I: `0.02 -> 51.41`, `0.03 -> 51.05`, `0.05 -> 49.07`, `0.07 -> 46.88`, `0.10 -> 44.58`. Full classification also prefers `0.02` (`46.48` Avg top1), but dense segmentation prefers `0.07`: the 64-sample probe is `18.11` Avg mIoU and selected full corrected rerun plus ADE20K clean aliases / `--ignore-zero` / recovered `last_hidden_state` dense tokens reaches VOC20 `37.57`, Context `22.00`, ADE20K `10.55`, average `23.38`. Diagnostic targeted ADE20K group calibration reaches ADE20K `11.47`, average `23.68` with validation-informed caveat.
 
 ## Token usage ablation
 
-The current token-usage ablation records training convergence only; downstream metrics per pooling mode still need to be run for paper-table parity.
+The token-usage ablation now has training convergence, downstream retrieval, full classification, and corrected 64-sample segmentation probe metrics.
 
 | Mode | Final train loss | Notes |
 |---|---:|---|
@@ -119,7 +119,7 @@ The current token-usage ablation records training convergence only; downstream m
 | mean | 0.501132 | full-token mean over token-anchor similarities |
 | cap | 0.283415 | Cross-Attention Pooling; main PAL setting |
 
-CAP remains best by training loss, consistent with the paper's qualitative claim, but downstream ablation metrics remain necessary.
+CAP remains best by training loss, downstream retrieval, full classification, and the segmentation probe: retrieval `51.05` > `37.26` > `25.20`, classification `45.63` > `42.49` > `39.05`, and probe Avg mIoU `16.51` > `11.77` > `0.61` for CAP/mean/global respectively.
 
 ## Anchor overlap
 
@@ -136,11 +136,11 @@ Matched vs mismatched overlap gap: `+0.080928` absolute, `+18.53%` relative over
 
 ## Remaining paper-parity work
 
-1. Run downstream retrieval/classification/segmentation metrics for each K, `tau_p`, and token-usage checkpoint; current sweep outputs are training-loss-only.
+1. Downstream retrieval and full classification metrics are complete for each K, `tau_p`, and token-usage checkpoint. Corrected segmentation has 64-sample probes, selected full K=256 / `tau_p=0.07` VOC20/Context reruns, and full ADE20K clean-alias rows for every sweep checkpoint; run the remaining full VOC20/Context segmentation rows only if full ablation-table parity is required.
 2. Expand the CKA proxy result into layer-specific token extraction + retraining if strict layer-selection parity is required.
 3. Continue dense segmentation debugging from the corrected full rerun; old segmentation JSONs are baseline/historical.
    - Start from `docs/segmentation_debug_notes.md` and `scripts/diagnose_segmentation_protocol.py`.
    - Corrected full rerun is complete: VOC20 `20.58`, Context `11.23`, ADE20K `2.19`, average `11.33`.
-   - ADE20K still needs prompt/name/layer debugging; Context may need dense-token layer selection and prompt ensemble to approach the paper row.
+   - The next-stage ADE20K layer/prompt/alias full rerun improves ADE20K to `5.66`; clean aliases + `--ignore-zero` improve the selected `tau_p=0.07` ADE20K row to `9.33`; recovered `last_hidden_state` dense tokens improve ADE20K to `10.55`; diagnostic targeted group calibration improves ADE20K to `11.47`. VOC20/Context sanity check shows `last_hidden_state` is ADE20K-specific, so further work should either add held-out calibration protocol or fill optional VOC20/Context full ablation rows.
 4. Add qualitative attention visualizations.
 5. Implement or port baseline rows (CSA, LinearRS, MLPRS, SAIL, FA) if reproducing full comparison tables.

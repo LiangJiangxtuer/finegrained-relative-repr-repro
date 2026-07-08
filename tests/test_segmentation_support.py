@@ -17,6 +17,8 @@ from pal_repro.segmentation import (  # noqa: E402
     PascalContextSegmentationDataset,
     VOC_CLASS_NAMES,
     build_segmentation_prompt_groups,
+    calibrate_dense_logits,
+    clean_ade20k_object_aliases,
     foreground_miou_from_intersections_unions,
     parse_ade20k_object_aliases,
     parse_ade20k_object_info,
@@ -26,7 +28,7 @@ from pal_repro.segmentation import (  # noqa: E402
     transform_mask_like_image_processor,
     update_intersections_unions,
 )
-from scripts.evaluate_segmentation import build_parser, load_dataset  # noqa: E402
+from scripts.evaluate_segmentation import build_parser, load_dataset, manual_class_bias  # noqa: E402
 
 
 class TestSegmentationSupport(unittest.TestCase):
@@ -231,7 +233,18 @@ class TestSegmentationSupport(unittest.TestCase):
                 "--output", "out.json",
                 "--vision-layer", "-2",
                 "--text-layer", "-6",
+                "--vision-layer-ensemble", "-1",
+                "--vision-layer-ensemble", "-2",
+                "--text-layer-ensemble", "-2",
+                "--text-layer-ensemble", "-4",
+                "--image-size", "448",
+                "--ignore-zero",
                 "--alias-policy", "all",
+                "--class-prior-source", "ade20k-ratio",
+                "--class-prior-alpha", "0.25",
+                "--class-bias", "wall,sky=0.02",
+                "--class-bias", "screen door=-0.03",
+                "--logit-calibration", "image-class-zscore",
                 "--prompt-template", "a photo of {class_name}",
                 "--prompt-template", "a clean photo of {class_name}",
             ]
@@ -239,8 +252,68 @@ class TestSegmentationSupport(unittest.TestCase):
 
         self.assertEqual(args.vision_layer, -2)
         self.assertEqual(args.text_layer, -6)
+        self.assertEqual(args.vision_layer_ensemble, [-1, -2])
+        self.assertEqual(args.text_layer_ensemble, [-2, -4])
+        self.assertEqual(args.image_size, 448)
+        self.assertTrue(args.ignore_zero)
         self.assertEqual(args.alias_policy, "all")
+        self.assertEqual(args.class_prior_source, "ade20k-ratio")
+        self.assertAlmostEqual(args.class_prior_alpha, 0.25)
+        self.assertEqual(args.class_bias, ["wall,sky=0.02", "screen door=-0.03"])
+        self.assertEqual(args.logit_calibration, "image-class-zscore")
         self.assertEqual(args.prompt_template, ["a photo of {class_name}", "a clean photo of {class_name}"])
+
+    def test_manual_class_bias_supports_explicit_groups_and_repeated_specs(self) -> None:
+        bias = manual_class_bias(
+            ["wall", "building", "sky", "screen door"],
+            ["wall,sky=0.02", "screen door=-0.03", "wall=0.01"],
+            device=torch.device("cpu"),
+        )
+
+        self.assertIsNotNone(bias)
+        assert bias is not None
+        self.assertEqual(tuple(bias.shape), (1, 4, 1, 1))
+        self.assertTrue(torch.allclose(bias.flatten(), torch.tensor([0.03, 0.0, 0.02, -0.03])))
+
+    def test_calibrate_dense_logits_centers_and_zscores_per_image_class(self) -> None:
+        logits = torch.tensor(
+            [
+                [
+                    [[1.0, 3.0], [5.0, 7.0]],
+                    [[2.0, 2.0], [2.0, 2.0]],
+                ]
+            ]
+        )
+
+        centered = calibrate_dense_logits(logits, mode="image-class-center")
+        zscored = calibrate_dense_logits(logits, mode="image-class-zscore")
+
+        self.assertTrue(torch.allclose(centered.mean(dim=(2, 3)), torch.zeros(1, 2)))
+        self.assertTrue(torch.allclose(zscored[0, 0].std(unbiased=False), torch.tensor(1.0)))
+        self.assertTrue(torch.allclose(zscored[0, 1], torch.zeros(2, 2)))
+
+    def test_clean_ade20k_object_aliases_removes_broad_wordnet_synonyms(self) -> None:
+        aliases = clean_ade20k_object_aliases(
+            [
+                (7, ["road", "route"]),
+                (13, ["person", "individual", "someone", "somebody", "mortal", "soul"]),
+                (19, ["curtain", "drape", "drapery", "mantle", "pall"]),
+                (21, ["car", "auto", "automobile", "machine", "motorcar"]),
+                (66, ["toilet", "can", "commode", "crapper", "pot", "potty", "stool", "throne"]),
+                (88, ["television receiver", "television", "tv", "idiot box"]),
+                (128, ["bicycle", "bike", "wheel", "cycle"]),
+                (139, ["ashcan", "trash can", "garbage can", "ash bin", "dustbin", "trash bin"]),
+            ]
+        )
+
+        self.assertEqual(aliases[0], (7, ["road"]))
+        self.assertEqual(aliases[1], (13, ["person"]))
+        self.assertEqual(aliases[2], (19, ["curtain", "drape", "drapery"]))
+        self.assertEqual(aliases[3], (21, ["car", "automobile", "motorcar"]))
+        self.assertEqual(aliases[4], (66, ["toilet", "commode"]))
+        self.assertEqual(aliases[5], (88, ["television", "tv"]))
+        self.assertEqual(aliases[6], (128, ["bicycle", "bike"]))
+        self.assertEqual(aliases[7], (139, ["ashcan", "trash can", "garbage can", "dustbin", "trash bin"]))
 
 
 if __name__ == "__main__":

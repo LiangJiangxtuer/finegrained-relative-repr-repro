@@ -170,17 +170,43 @@ Supported by evidence.
 
 This points beyond a pure mIoU accumulator bug: the dense class logits themselves are poorly calibrated for frequent scene classes.
 
-## Current root-cause ranking
+## Root-cause ranking after corrected-protocol rerun
 
 1. **Context protocol mismatch was a major bug.** The evaluator now supports `--context-protocol common59`; full Context improves from `0.53` to `11.23` mIoU.
 2. **Dense evaluation geometry was implicit and partially wrong.** The evaluator now supports `--target-frame processor`; old full metrics remain historical, while corrected full VOC20 improves from `14.82` to `20.58`.
-3. **ADE20K remains unresolved.** Processor-frame scoring improves full ADE20K only from `1.47` to `2.19`, so the remaining gap likely needs dataset-specific prompt/name cleanup, dense-layer selection, or another paper-protocol detail.
-4. **Class-name normalization / prompt engineering is still incomplete.** Minimal aliases (`tvmonitor -> tv monitor`, `pottedplant -> potted plant`, `bedclothes -> bed clothes`) are implemented, but ADE20K aliases and prompt ensembles are not.
-5. **Layer-selection / dense-token choice may be mismatched.** Retrieval/classification are much closer to paper than segmentation, so dense patch alignment may be particularly sensitive to the paper's CKA-selected layers.
+3. **ADE20K was the remaining dataset-specific bottleneck.** Processor-frame scoring alone improved full ADE20K only from `1.47` to `2.19`, but later clean aliases, `--ignore-zero`, recovered `last_hidden_state` dense tokens, and targeted group calibration raised diagnostic ADE20K to `11.47`.
+4. **Class-name normalization / prompt engineering mattered for ADE20K.** Conservative clean aliases avoid misleading WordNet terms and improve the selected ADE20K row from `7.99` to `9.33`.
+5. **Layer-selection / dense-token choice was mismatched for ADE20K.** Recovered `last_hidden_state` dense tokens improve ADE20K to `10.55`, but VOC20/Context sanity shows this protocol should not be applied globally.
 
 ## Next recommended actions
 
 1. Treat the previous full-run segmentation JSON files as historical/baseline, because they used the old implicit original-mask frame and all-459 Context path.
-2. Before spending more full ADE20K time, run 16-64 sample ADE20K prompt/name probes; the geometry fix alone did not help enough.
-3. If Context needs further improvement beyond `11.23`, the next debug layer is dense-token layer selection and prompt ensemble, not mIoU bookkeeping.
-4. Update the ordered pipeline so future segmentation tasks use corrected output names and explicit protocol flags.
+2. Treat targeted ADE20K group calibration as validation-informed diagnostics unless a held-out calibration protocol is added.
+3. If Context needs further improvement beyond `22.00` selected full mIoU, the next debug layer is Context-specific dense-token layer selection and prompt ensemble, not a global ADE20K `last_hidden_state` switch.
+4. Future segmentation tasks should keep explicit protocol flags in output names/JSON: target frame, Context protocol, alias policy, `--ignore-zero`, dense-token layer choice, and any diagnostic class bias.
+
+## ADE20K follow-up after selected full `tau_p=0.07`
+
+Updated on 2026-07-06 after the selected full `tau_p=0.07` segmentation rerun made ADE20K the remaining bottleneck. Detailed report: `docs/ade20k_dense_debug_results.md`.
+
+Key findings:
+
+- Image-size probes at 224/336/448 did not improve ADE20K limit-64 mIoU (`2.83`, `2.86`, `2.75`).
+- Prompt/layer probes were noisy: `a photo of a {class_name}` with `text_layer=-4` looked best on limit 64 (`3.22`) but underperformed on the full split (`6.96` without ignore-zero, `7.50` with ignore-zero).
+- ADE20K annotations include label id 0 void/unlabeled pixels. Across 2,000 validation masks, zero-label pixels average `8.39%`; 430 images have more than 10% zero-label pixels.
+- `scripts/evaluate_segmentation.py --ignore-zero` was added to treat label id 0 as void during mIoU accumulation.
+- Full ADE20K selected `tau_p=0.07` improves from `7.62` to `7.99` with `--ignore-zero` using the original best 4-template ensemble and `vision_layer=-1`, `text_layer=-2`.
+- Updated selected full summary: `outputs/ablations/segmentation_full_selected/summary_ade20k_ignore0.json`; average segmentation mIoU becomes `22.52` vs paper `23.87`.
+
+## ADE20K alias cleanup and calibration follow-up
+
+Updated on 2026-07-07. Detailed generated report: `docs/ade20k_frequent_class_error_analysis.md`.
+
+- `src/pal_repro/segmentation.py` now contains a conservative ADE20K clean-alias table that avoids broad WordNet aliases such as `route`, `mortal/soul`, `machine`, `mantle/pall`, `throne/stool`, `wheel/cycle`, and `idiot box`.
+- The ordered pipeline now runs ADE20K segmentation with `--alias-policy clean --ignore-zero` so future reruns avoid misleading raw aliases by default.
+- The completed full clean-alias ADE20K all-variant run is `outputs/ablations/segmentation_full_ade20k_clean_ignore0_all_variants/summary.json`; best row is `tau_p=0.07` with ADE20K mIoU `9.33`, improving the selected full average to `22.97` (`96.24%` of the paper average target) when paired with the existing VOC20 `37.57` and Context `22.00` rows.
+- Frequent-class probe analysis over `wall/building/sky/floor/tree/person/road` shows that uncalibrated alias policies remain best on mean mIoU (`alias_first` 3.069, `alias_all` 3.032, `alias_clean` 2.962 on limit 64 with `--ignore-zero`).
+- Simple class-prior logit bias is not recommended for ADE20K: ADE20K-ratio prior alpha=0.1 drops to `2.43`, alpha=0.25 collapses to `0.54`, and train-count alpha=0.25 reaches only `0.97`; foreground/background calibration is not indicated beyond treating label id 0 as void.
+- Dense-token/layer protocol recovery then found that using encoder `last_hidden_state` outputs for ADE20K dense scoring improves the selected full ADE20K row to `10.55`; updated selected average is `23.38` (`97.94%` of paper average). Diagnostic image-class center/zscore calibration hurts the 64-sample loop and should not be promoted. See `docs/ade20k_dense_protocol_recovery.md`.
+- VOC20/Context sanity check shows `last_hidden_state` is ADE20K-specific: VOC20 `37.57 -> 33.57`, Context `22.00 -> 21.90`. Targeted ADE20K group calibration with `wall,building,sky,floor,tree,person,road=0.04` improves full ADE20K `10.55 -> 11.47`; selected diagnostic average is `23.68` (`99.23%`) but should be labeled validation-informed. See `docs/ade20k_group_calibration_results.md`.
+- Foreground/background calibration is not indicated for ADE20K beyond ignoring label id 0 as void; adding a predicted background class would be a separate VOC/Context protocol experiment rather than an ADE20K fix.

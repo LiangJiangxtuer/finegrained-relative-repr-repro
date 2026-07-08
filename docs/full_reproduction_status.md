@@ -58,7 +58,7 @@ PYTHONPATH=src /home/hnxxzy/miniconda3/envs/ovvs/bin/python -m unittest discover
 Result:
 
 ```text
-Ran 47 tests in 0.183s
+Ran 63 tests in 0.206s
 OK
 ```
 
@@ -276,8 +276,8 @@ Full machine-readable results are summarized in `docs/results_snapshot.md`.
 
 ## Remaining for paper-grade result parity
 
-- Run downstream retrieval/classification/segmentation metrics for the K, `tau_p`, and token-usage ablation checkpoints; current sweep outputs are training-loss-only.
+- Downstream retrieval and full classification metrics are complete for the K, `tau_p`, and token-usage ablation checkpoints (`docs/ablation_downstream_retrieval_results.md`, `docs/ablation_downstream_classification_segmentation_results.md`). Corrected segmentation has 64-sample probes for all sweep checkpoints, selected full reruns for K=256 / `tau_p=0.07`, full ADE20K clean-alias rows for every sweep checkpoint, ADE20K dense-token/layer recovery, and targeted group-calibration diagnostics; the best uncalibrated selected full rerun is `tau_p=0.07` with VOC20 `37.57`, Context `22.00`, ADE20K `10.55`, average `23.38` vs paper `23.87`. Diagnostic targeted ADE20K calibration reaches ADE20K `11.47`, average `23.68` (`99.23%`) but is validation-informed.
 - If desired, expand the CKA proxy sweep into full layer-specific token extraction/training/evaluation.
-- Continue dense segmentation debugging from the corrected full rerun: VOC20 `20.58`, Context `11.23`, ADE20K `2.19`, average `11.33` vs paper `23.87`. Prioritize ADE20K prompt/name/layer debugging and Context dense-token layer/prompt ensemble work.
+- Dense segmentation debugging now has an ADE20K recovered `last_hidden_state` dense-token full confirmation and targeted group-calibration diagnostics. VOC20/Context sanity check shows `last_hidden_state` should stay ADE20K-specific (`37.57 -> 33.57` for VOC20, `22.00 -> 21.90` for Context). Simple class priors plus image-class center/zscore calibration did not help; targeted frequent-class bias helps ADE20K but needs a held-out calibration protocol if it is to be treated as more than diagnostic.
 - Produce anchor-overlap and qualitative attention visualizations.
 - Implement/run baseline methods if reproducing every comparison row, not just PAL target rows.

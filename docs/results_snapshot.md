@@ -100,8 +100,8 @@ Segmentation protocol diagnostics:
   - VOC20, `--target-frame processor`: mIoU `12.5179`.
   - Pascal Context, `--target-frame processor --context-protocol common59`: mIoU `12.3125` over 59 classes.
   - ADE20K, `--target-frame processor`: mIoU `0.2571`.
-- interpretation: the old full-run Context number used all 459 labels and original-mask scoring; it should now be treated as historical. Common-59 + processor-frame scoring is the required rerun condition for Context. ADE20K remains unresolved because processor-frame scoring alone barely improves the cheap probe.
-- corrected full-run interpretation: the corrected protocol roughly doubles the segmentation macro average (`5.61 -> 11.33`) but remains below paper (`23.87`); ADE20K is still the main unresolved dense-evaluation gap.
+- interpretation at this diagnostic stage: the old full-run Context number used all 459 labels and original-mask scoring; it should now be treated as historical. Common-59 + processor-frame scoring is the required rerun condition for Context. Processor-frame scoring alone barely improves the cheap ADE20K probe, so later ADE20K-specific alias/layer calibration work was required.
+- corrected full-run interpretation: the corrected protocol roughly doubles the segmentation macro average (`5.61 -> 11.33`) but remains below paper (`23.87`); later ADE20K clean aliases, `--ignore-zero`, recovered `last_hidden_state` dense tokens, and diagnostic targeted group calibration are summarized in the selected-full table below.
 
 ## Completed pipeline sweeps and analyses
 
@@ -135,6 +135,36 @@ The ordered pipeline completed training-only sweep jobs for K, `tau_p`, and toke
 | mean | 0.501132 |
 | cap | 0.283415 |
 
+### Downstream retrieval ablation metrics
+
+Detailed per-run JSONs live under `outputs/ablations/retrieval/`; the machine-readable summary is `outputs/ablations/retrieval/summary.json`, and the readable report is `docs/ablation_downstream_retrieval_results.md`. These retrieval metrics use official/Karpathy COCO and Flickr30k multi-caption token caches. `Avg R@1` below averages COCO I2T, COCO T2I, Flickr30k I2T, and Flickr30k T2I R@1.
+
+| Sweep | Best local retrieval setting | Avg R@1 | Key trend |
+|---|---|---:|---|
+| K | K=512 | 51.05 | Monotonic increase from K32 `35.94` to K512 `51.05`. |
+| `tau_p` | `0.02` | 51.41 | Slightly above main `0.03` retrieval Avg R@1 `51.05`; classification/segmentation still needed before changing the main setting. |
+| token usage | CAP | 51.05 | CAP `51.05` > mean `37.26` > global `25.20`, confirming the downstream retrieval benefit of CAP beyond train loss. |
+
+### Downstream classification and segmentation-probe ablations
+
+Detailed report: `docs/ablation_downstream_classification_segmentation_results.md`. Full classification ablation output: `outputs/ablations/classification_fast/summary.json`. Corrected 64-sample segmentation probe output: `outputs/ablations/segmentation_probes_fast/summary.json`.
+
+| Sweep | Classification finding | 64-sample segmentation probe finding |
+|---|---|---|
+| K | Avg top1 improves monotonically K32 `38.20` -> K512 `45.63`. | Probe Avg mIoU peaks at K256 `17.17`, slightly above K512 `16.51`. |
+| `tau_p` | `0.02` best Avg top1 `46.48`; main `0.03` is `45.63`. | `0.07` best probe Avg mIoU `18.11`; `0.05` close at `17.58`. |
+| token usage | CAP `45.63` > mean `42.49` > global `39.05`. | CAP `16.51` > mean `11.77` >> global `0.61`. |
+
+Selected full corrected segmentation reruns are now complete for the probe-prioritized checkpoints:
+
+| Variant | VOC20 mIoU | Context mIoU | ADE20K mIoU | Avg mIoU | Relative to paper avg |
+|---|---:|---:|---:|---:|---:|
+| K=256 | 33.48 | 20.32 | 5.89 | 19.90 | 83.37% |
+| `tau_p=0.07` + ADE20K `--ignore-zero` | 37.57 | 22.00 | 7.99 | 22.52 | 94.37% |
+| `tau_p=0.07` + ADE20K clean aliases + `--ignore-zero` | 37.57 | 22.00 | 9.33 | 22.97 | 96.24% |
+| `tau_p=0.07` + ADE20K clean aliases + `--ignore-zero` + recovered `last_hidden_state` dense tokens | 37.57 | 22.00 | 10.55 | 23.38 | 97.94% |
+| diagnostic targeted ADE20K group calibration | 37.57 | 22.00 | 11.47 | 23.68 | 99.23% |
+
 ### Anchor overlap
 
 | Metric | Value |
@@ -161,13 +191,13 @@ PYTHONPATH=src /home/hnxxzy/miniconda3/envs/ovvs/bin/python -m unittest discover
 Current result:
 
 ```text
-Ran 47 tests in 0.183s
+Ran 63 tests in 0.206s
 OK
 ```
 
 ## Interpretation caveats
 
-- The implementation uses final DINOv2-L/RoBERTa-L hidden tokens. The paper mentions CKA-based layer selection but the exact layer indices were not recovered from the PDF text.
+- The implementation originally used explicit DINOv2-L/RoBERTa-L hidden-state indices for dense segmentation. ADE20K dense-token recovery shows the encoders' `last_hidden_state` outputs improve the selected ADE20K full row to `10.55`; the exact paper dense-token/layer convention remains partially inferred.
 - COCO and Flickr30k Karpathy test extraction/evaluation are complete. Both are now the preferred retrieval rows for paper-protocol comparison; the older seed-42 subset rows are retained only as historical proxies.
 - Prompt-template sweep improved classification average top-1 from 44.69 to 46.09; remaining gap suggests prompt choice is only a partial explanation.
-- VOC20/Context/ADE20K corrected full segmentation rerun is complete. Processor-frame + Context common-59 roughly doubles macro mIoU (`5.61 -> 11.33`), but still trails the paper average (`23.87`), with ADE20K remaining the main unresolved dense-evaluation gap. K/`tau_p`/token-usage sweep training is complete; downstream ablation metrics remain to be run.
+- VOC20/Context/ADE20K corrected full segmentation rerun is complete. Processor-frame + Context common-59 roughly doubles macro mIoU (`5.61 -> 11.33`), and the ADE20K layer/prompt/alias full rerun improves ADE20K to `5.66`. The selected full `tau_p=0.07` segmentation rerun plus ADE20K clean aliases, `--ignore-zero`, and recovered `last_hidden_state` dense tokens reaches average mIoU `23.38` vs paper average `23.87`, with ADE20K still the main gap (`10.55` vs `13.80`). Diagnostic targeted ADE20K group calibration reaches ADE20K `11.47` and selected average `23.68` (`99.23%`), but it is validation-informed. K/`tau_p`/token-usage sweep training, downstream retrieval, downstream classification, segmentation probes, selected full segmentation reruns, ADE20K ignore-zero correction, full ADE20K clean-alias rows, ADE20K dense-token/layer recovery, and targeted group-calibration diagnostics are complete.

@@ -5,7 +5,7 @@
 报告时间：2026-07-03 01:30:51 EDT  
 仓库：`finegrained-relative-repr-repro`
 
-> 当前结论：仓库已经完成严格 PAL 核心实现、COCO2014 约 80K 训练样本 token 缓存、K=512 主模型训练，以及主要 retrieval / zero-shot classification 评测。COCO/Flickr30k Karpathy official split 已对齐并复评；official retrieval 平均 R@1 达到论文目标的约 **86.17%**。Prompt sweep 后分类平均 top-1 达到论文目标的约 **89.56%**。VOC20/Context/ADE20K full segmentation 均已跑完，但平均只达到论文 mIoU 的 **23.50%**。K / `tau_p` / token usage 训练型 sweep 已完成；尚未完成这些 ablation checkpoint 的下游指标复评、layer-specific CKA 复训和 baseline 对比。
+> 当前结论：仓库已经完成严格 PAL 核心实现、COCO2014 约 80K 训练样本 token 缓存、K=512 主模型训练，以及主要 retrieval / zero-shot classification 评测。COCO/Flickr30k Karpathy official split 已对齐并复评；official retrieval 平均 R@1 达到论文目标的约 **86.17%**。Prompt sweep 后分类平均 top-1 达到论文目标的约 **89.56%**。VOC20/Context/ADE20K corrected full segmentation 均已跑完，corrected 平均 mIoU 为 **11.33**；next-stage ADE20K layer/prompt/alias full rerun 将 ADE20K 从 **2.19** 提升到 **5.66**。K / `tau_p` / token usage 训练型 sweep、downstream retrieval ablation、full classification ablation、corrected 64-sample segmentation probes、selected full corrected segmentation ablation、全量 ADE20K clean-alias segmentation rows、ADE20K dense-token/layer recovery 和 targeted group-calibration diagnostics 已完成；selected full `tau_p=0.07` segmentation 加 ADE20K clean aliases + `--ignore-zero` + recovered `last_hidden_state` dense tokens 达到平均 mIoU **23.38**（论文平均 **23.87** 的 **97.94%**）。诊断性 targeted group calibration 将 ADE20K 提升到 **11.47**，诊断平均 **23.68**（**99.23%**），但该 calibration 是 validation-informed；未校准 ADE20K 仍是主要差距（**10.55** vs **13.80**）。尚未完成 layer-specific CKA 复训和 baseline 对比。
 
 ---
 
@@ -46,14 +46,16 @@
   - Flickr30k local 1K multi-caption retrieval
   - Flickr30k Karpathy test 1K multi-caption retrieval
   - STL10 / CIFAR100 / Caltech101 / DTD / EuroSAT zero-shot classification 与 prompt-template sweep
-  - VOC20 / Pascal Context / ADE20K full segmentation
+  - VOC20 / Pascal Context / ADE20K full segmentation 与 corrected segmentation rerun
   - K / `tau_p` / token usage 训练型 sweep
+  - K / `tau_p` / token usage downstream retrieval ablation、full classification ablation、corrected 64-sample segmentation probes、selected full corrected segmentation reruns
+  - ADE20K class-name/alias cleanup、full clean-alias rows、dense-token/layer protocol recovery、targeted group-calibration diagnostics 与 frequent-class error analysis
   - COCO Karpathy anchor-overlap analysis
 - 当前无活跃 Hermes pipeline 后台任务；ordered pipeline 已正常结束。
 
 ### 尚未完成
 
-- K / `tau_p` / token usage ablation checkpoint 的 retrieval / classification / segmentation 下游指标复评。
+- K / `tau_p` / token usage ablation checkpoint 剩余 full corrected segmentation rows（retrieval/classification/probes 完成，K256 与 `tau_p=0.07` selected full 完成；其余按需补齐）。
 - COCO80K + COCO2017 30K data scaling 实验。
 - 官方/Karpathy split 已完成 COCO/Flickr30k 对齐；prompt template sweep 已完成；CKA proxy sweep 已完成。
 - CSA / LinearRS / MLPRS / SAIL / FA 等 baseline 行的完整对比。
@@ -105,7 +107,7 @@ export PYTHONPATH=src
 PYTHONPATH=src $PY -m unittest discover -s tests -v
 ```
 
-最近记录结果：`Ran 47 tests in 0.183s ... OK`。
+最近记录结果：`Ran 63 tests in 0.206s ... OK`。
 
 ### 3.2 提取 COCO2014 train token cache
 
@@ -243,6 +245,12 @@ Corrected full segmentation rerun 已完成：
 | ADE20K | `--target-frame processor` | 2,000 | 2.19 | 13.80 | 15.87% |
 | Average | - | - | 11.33 | 23.87 | 47.48% |
 
+Next-stage ADE20K layer/prompt/alias pass 已完成：64-sample probe 最佳为 `vision_layer=-1`, `text_layer=-2`, aliases + 4-template ensemble，mIoU `2.54`；对应 full ADE20K rerun 输出 `outputs/pal_k512_coco2014_full/ade20k_segmentation_v-1_t-2_alias_all_ensemble_full.json`，mIoU `5.66`，相对 corrected baseline `2.19` 有明显提升。
+
+随后完成 ADE20K class-name/alias cleanup、`--ignore-zero`、dense-token/layer protocol recovery：clean aliases 将 selected ADE20K 提升到 `9.33`；recovered `last_hidden_state` dense tokens 的 full confirmation 输出 `outputs/diagnostics/ade20k_dense_protocol_recovery_full/last_hidden_state_vlast_tlast.json`，ADE20K mIoU `10.55`。对应 selected VOC20/Context/ADE20K 平均 mIoU 为 `23.38`，达到论文平均 `23.87` 的 `97.94%`。VOC20/Context sanity check 显示 `last_hidden_state` 不应全局替换：VOC20 `37.57 -> 33.57`，Context `22.00 -> 21.90`。
+
+更细粒度 targeted group calibration 也已完成：`wall,building,sky,floor,tree,person,road=0.04` 的 ADE20K full diagnostic row 为 `11.47`，对应诊断 selected 平均 `23.68`（论文平均的 `99.23%`）。该行是 validation-informed diagnostic calibration，不能无 caveat 当作原始 paper protocol。详见 `docs/ade20k_dense_debug_results.md`、`docs/ade20k_dense_protocol_recovery.md` 与 `docs/ade20k_group_calibration_results.md`。
+
 ---
 
 ## 4. 训练结果
@@ -318,16 +326,16 @@ Prompt-template sweep best-of-4 后：
 | ADE20K | full validation | 2,000 | 1.47 | 13.80 | -12.33 | 10.67% | full evaluation 已完成，结果提示 protocol/debug gap 较大 |
 | **Average** | - | - | **5.61** | **23.87** | **-18.26** | **23.50%** | VOC20/Context/ADE20K 平均 |
 
-Segmentation 结果分析：三套 segmentation full run 均已跑通，证明 dense patch profile -> class prompt similarity -> mask upsample -> foreground mIoU 的完整路径可执行；但旧 full-run JSON 使用了隐式 original-mask frame，且 Context 使用 all-459 protocol，因此这些数值现在应视为历史基线而非最终 paper-parity rows。正式 evaluator 已支持 `--target-frame processor` 和 Context `--context-protocol common59`；corrected full rerun 后，segmentation 平均 mIoU 从 `5.61` 提升到 `11.33`，达到论文平均 `23.87` 的 `47.48%`。VOC20 提升到 `20.58`，Context common-59 提升到 `11.23`，ADE20K 仅提升到 `2.19`，仍是主要 unresolved gap。
+Segmentation 结果分析：三套 segmentation full run 均已跑通，证明 dense patch profile -> class prompt similarity -> mask upsample -> foreground mIoU 的完整路径可执行；但旧 full-run JSON 使用了隐式 original-mask frame，且 Context 使用 all-459 protocol，因此这些数值现在应视为历史基线而非最终 paper-parity rows。正式 evaluator 已支持 `--target-frame processor` 和 Context `--context-protocol common59`；corrected full rerun 后，segmentation 平均 mIoU 从 `5.61` 提升到 `11.33`，达到论文平均 `23.87` 的 `47.48%`。VOC20 提升到 `20.58`，Context common-59 提升到 `11.23`。ADE20K 经 next-stage layer/prompt/alias full rerun 从 `2.19` 进一步提升到 `5.66`，但仍是主要 unresolved gap。
 
 ### 5.4 消融实验状态
 
 | 实验组 | 论文目标 | 当前状态 | 下一步 |
 |---|---|---|---|
-| Token usage + CAP | global only / full tokens / CAP 三行平均指标 | 训练型 sweep 完成：global 0.7402 / mean 0.5011 / CAP 0.2834 final loss | 补每个 checkpoint 的 retrieval / classification / segmentation 下游指标 |
-| Anchor count K | `32, 64, 128, 256, 512` | 训练型 sweep 完成；final loss 随 K 增大单调降低：0.5094 -> 0.2834 | 补每个 K 的下游指标，不能只用 train loss 对齐论文表 |
+| Token usage + CAP | global only / full tokens / CAP 三行平均指标 | retrieval/classification/seg probe 均为 CAP 最优：seg probe `16.51` > mean `11.77` > global `0.61` | 剩余 VOC20/Context full segmentation rows 按需补齐；ADE20K full clean rows 已完成 |
+| Anchor count K | `32, 64, 128, 256, 512` | retrieval/classification 随 K 单调提升；selected full K256 avg mIoU `19.90` | 其余 K 的 VOC20/Context full segmentation 按需补齐；ADE20K full clean rows 已完成 |
 | Data scaling | COCO80K vs COCO80K + COCO2017 30K | 未运行 | 准备 COCO2017 30K 追加数据与 token cache |
-| CAP temperature `tau_p` | `0.02, 0.03, 0.05, 0.07, 0.10` | 训练型 sweep 完成；final loss：0.2528 / 0.2834 / 0.3360 / 0.3710 / 0.4077 | 补每个 tau 的下游指标，低 train loss 不等价于 paper 最优 |
+| CAP temperature `tau_p` | `0.02, 0.03, 0.05, 0.07, 0.10` | retrieval/classification 最佳 `0.02`；selected full `tau_p=0.07` + ADE20K clean aliases / `--ignore-zero` / recovered `last_hidden_state` dense tokens avg mIoU `23.38`；诊断 group calibration avg `23.68` | 其余 VOC20/Context full segmentation 按需补齐；ADE20K full clean-alias rows、dense-token recovery 与 targeted calibration diagnostics 已补齐 |
 | Anchor overlap | Flickr30k / COCO matched vs mismatched overlap & Dice | COCO Karpathy top-5 完成：matched 0.5176 vs mismatched 0.4367 | 补 qualitative attention / 可视化样例 |
 | Qualitative attention | anchor heatmap / caption attention > 0.5 | 未运行 | 输出可视化样例图和 markdown/csv 索引 |
 
@@ -348,10 +356,10 @@ Segmentation 结果分析：三套 segmentation full run 均已跑通，证明 d
 4. **Segmentation full-val 已完成，正式协议已修正并完成 corrected rerun**
    VOC20 / Context / ADE20K historical full run 平均 mIoU 为 5.61 vs 论文 23.87，但这些 JSON 是历史协议结果。`scripts/evaluate_segmentation.py` 现在支持 `--target-frame {original,processor}` 和 `--context-protocol {all459,common59}`；16-sample corrected probe 显示 Context common-59 processor-frame 从旧 all-459 processor-frame `0.76` 提升到 `12.31`。详见 `docs/segmentation_debug_notes.md`。
 
-   Corrected full rerun 已完成：VOC20 `20.58`、Context `11.23`、ADE20K `2.19`、平均 `11.33`，较历史平均 `5.61` 提升 `+5.72`，但仍低于论文平均 `23.87`。
+   Corrected full rerun 已完成：VOC20 `20.58`、Context `11.23`、ADE20K `2.19`、平均 `11.33`，较历史平均 `5.61` 提升 `+5.72`，但仍低于论文平均 `23.87`。Next-stage ADE20K layer/prompt/alias full rerun 将 ADE20K 提升到 `5.66`；clean aliases + `--ignore-zero` + recovered `last_hidden_state` dense tokens 进一步将 selected ADE20K 提升到 `10.55`，selected 平均 `23.38`，已接近论文平均但 ADE20K 单项仍低于 `13.80`。Targeted group calibration 诊断行将 ADE20K 提升到 `11.47`、平均 `23.68`，但该行需标注 validation-informed caveat。
 
 5. **Baseline 和 ablation 尚未完成**  
-   当前只比较 PAL 主模型 target row；若目标是完整复现论文所有表格，还需要实现或导入 CSA / LinearRS / MLPRS / SAIL / FA，并运行全部 ablation。
+   当前已补齐 K / `tau_p` / token usage 的 downstream retrieval ablation、full classification ablation、corrected 64-sample segmentation probes、selected full segmentation ablation 和 ADE20K full clean-alias rows（见 `docs/ablation_downstream_classification_segmentation_results.md`）。若目标是完整复现论文所有表格，还需要补齐剩余 VOC20/Context full segmentation rows，并实现或导入 CSA / LinearRS / MLPRS / SAIL / FA。
 
 ---
 
@@ -377,10 +385,10 @@ Segmentation 结果分析：三套 segmentation full run 均已跑通，证明 d
    - Pascal Context 已增加 `--context-protocol {all459,common59}`，paper-oriented corrected full rerun 已使用 common-59。
    - 对齐 foreground mIoU 口径、背景类处理、ignore label、mask resize。
 
-5. **运行主消融实验**
-   - K sweep：`32, 64, 128, 256, 512`。
-   - `tau_p` sweep：`0.02, 0.03, 0.05, 0.07, 0.10`。
-   - Token usage：global only / full-token mean / full-token CAP。
+5. **继续主消融实验**
+   - K / `tau_p` / token usage 的 retrieval 与 classification ablation 已完成。
+   - corrected segmentation 已有 64-sample probes，且 K256 / `tau_p=0.07` selected full reruns 已完成。
+   - 若需要完整 ablation table，再补齐每个 checkpoint 的 VOC20/Context full segmentation；否则如需把 diagnostic group calibration 当主结果，应增加 held-out calibration protocol。
 
 6. **补齐 anchor analysis**
    - 用已完成的 COCO/Flickr retrieval pairs 计算 top-5 anchor overlap 与 Dice。
@@ -414,6 +422,11 @@ docs/
   full_reproduction_status.md
   continuation_handoff.md
   results_snapshot.md
+  ablation_downstream_retrieval_results.md
+  ablation_downstream_classification_segmentation_results.md
+  recent_experiment_audit_summary.md
+  ade20k_dense_protocol_recovery.md
+  ade20k_group_calibration_results.md
   pipeline_results_snapshot.md
   segmentation_debug_notes.md
   zh_experiment_design_results_analysis.md
@@ -469,5 +482,7 @@ external/bridge-anchors/.git/
   - `outputs/diagnostics/context_common59_processor_segmentation_probe_eval.json`
   - `outputs/diagnostics/ade20k_processor_segmentation_probe_eval.json`
 - Segmentation debug notes：`docs/segmentation_debug_notes.md`
+- Downstream retrieval ablation summary：`docs/ablation_downstream_retrieval_results.md`
+- Downstream classification / segmentation probe ablation summary：`docs/ablation_downstream_classification_segmentation_results.md`
 - 已整理结果快照：`docs/results_snapshot.md`
 - 续接上下文：`docs/continuation_handoff.md`

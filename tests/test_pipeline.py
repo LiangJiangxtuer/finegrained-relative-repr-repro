@@ -53,6 +53,9 @@ class TestReproductionPipeline(unittest.TestCase):
         ade = steps["ade20k_full_segmentation"]
         self.assertIn("--target-frame", ade.command)
         self.assertIn("processor", ade.command)
+        self.assertIn("--alias-policy", ade.command)
+        self.assertIn("clean", ade.command)
+        self.assertIn("--ignore-zero", ade.command)
 
     def test_pipeline_classification_uses_fixed_prompt_ensemble(self) -> None:
         steps = {step.name: step for step in build_pipeline_steps(PipelineConfig(root=Path("/repo")))}

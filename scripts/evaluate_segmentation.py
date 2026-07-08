@@ -25,6 +25,8 @@ from pal_repro.segmentation import (
     PascalContextSegmentationDataset,
     VOC_CLASS_NAMES,
     build_segmentation_prompt_groups,
+    calibrate_dense_logits,
+    clean_ade20k_object_aliases,
     dense_patch_logits,
     foreground_miou_from_intersections_unions,
     image_patch_profiles,
@@ -90,6 +92,100 @@ def select_hidden_state(outputs: Any, layer: int | None) -> torch.Tensor:
     return hidden_states[layer]
 
 
+def select_token_features(
+    outputs: Any,
+    layer: int | None,
+    layer_ensemble: list[int] | None = None,
+) -> torch.Tensor:
+    """Return a single token tensor, optionally averaging hidden-state layers."""
+
+    if layer_ensemble:
+        states = [select_hidden_state(outputs, item).float() for item in layer_ensemble]
+        return torch.stack(states, dim=0).mean(dim=0)
+    return select_hidden_state(outputs, layer).float()
+
+
+def override_image_processor_size(image_processor: Any, image_size: int | None) -> None:
+    """Optionally evaluate dense segmentation at a larger square processor crop."""
+
+    if image_size is None:
+        return
+    size = int(image_size)
+    image_processor.size = {"shortest_edge": size}
+    image_processor.crop_size = {"height": size, "width": size}
+
+
+def class_aliases_for_dataset(source_dataset: Any, class_names: list[str], alias_policy: str) -> list[list[str]]:
+    if alias_policy == "all" and hasattr(source_dataset, "class_aliases"):
+        return [aliases for _class_id, aliases in source_dataset.class_aliases]
+    if alias_policy == "clean" and hasattr(source_dataset, "class_aliases"):
+        return [aliases for _class_id, aliases in clean_ade20k_object_aliases(source_dataset.class_aliases)]
+    return [[name] for name in class_names]
+
+
+def ade20k_prior_bias(
+    dataset_name: str,
+    root: Path,
+    class_ids: list[int],
+    source: str,
+    alpha: float,
+    device: torch.device,
+) -> torch.Tensor | None:
+    if source == "none" or alpha == 0.0:
+        return None
+    if dataset_name != "ADE20K":
+        raise ValueError("class-prior correction is currently implemented only for ADE20K")
+    values: dict[int, float] = {}
+    for raw in (root / "objectInfo150.txt").read_text(encoding="utf-8").splitlines():
+        line = raw.strip()
+        if not line or line.startswith("Idx"):
+            continue
+        parts = line.split("\t")
+        class_id = int(parts[0])
+        if source == "ade20k-ratio":
+            values[class_id] = float(parts[1])
+        elif source == "ade20k-train-count":
+            values[class_id] = float(parts[2])
+        else:
+            raise ValueError(f"Unsupported class prior source: {source}")
+    prior = torch.tensor([values[int(class_id)] for class_id in class_ids], dtype=torch.float32, device=device)
+    prior = prior / prior.sum().clamp_min(1e-12)
+    bias = torch.log(prior.clamp_min(1e-12))
+    bias = bias - bias.mean()
+    return (float(alpha) * bias).view(1, -1, 1, 1)
+
+
+def manual_class_bias(
+    class_names: list[str],
+    specs: list[str] | None,
+    device: torch.device,
+) -> torch.Tensor | None:
+    """Build a dense-logit bias tensor from explicit class/group specs.
+
+    Spec format is ``class name=value`` or ``class a,class b=value``. This is
+    intentionally explicit so diagnostic calibration probes can target a small
+    class group without introducing a global dataset prior.
+    """
+
+    if not specs:
+        return None
+    name_to_index = {name: idx for idx, name in enumerate(class_names)}
+    bias = torch.zeros(len(class_names), dtype=torch.float32, device=device)
+    for spec in specs:
+        if "=" not in spec:
+            raise ValueError(f"Class-bias spec must be NAME=VALUE, got: {spec!r}")
+        names_text, value_text = spec.split("=", 1)
+        value = float(value_text)
+        names = [item.strip() for item in names_text.split(",") if item.strip()]
+        if not names:
+            raise ValueError(f"Class-bias spec has no class names: {spec!r}")
+        for name in names:
+            if name not in name_to_index:
+                raise KeyError(f"Unknown class name in --class-bias: {name!r}")
+            bias[name_to_index[name]] += value
+    return bias.view(1, -1, 1, 1)
+
+
 @torch.no_grad()
 def encode_class_profile_groups(
     pal_model,
@@ -99,6 +195,7 @@ def encode_class_profile_groups(
     device: torch.device,
     max_length: int,
     text_layer: int | None,
+    text_layer_ensemble: list[int] | None = None,
 ) -> torch.Tensor:
     flat_prompts = [prompt for group in prompt_groups for prompt in group]
     inputs = tokenizer(
@@ -108,8 +205,11 @@ def encode_class_profile_groups(
         truncation=True,
         max_length=max_length,
     ).to(device)
-    outputs = text_model(**inputs, output_hidden_states=text_layer is not None)
-    text_tokens = select_hidden_state(outputs, text_layer).float()
+    outputs = text_model(
+        **inputs,
+        output_hidden_states=text_layer is not None or bool(text_layer_ensemble),
+    )
+    text_tokens = select_token_features(outputs, text_layer, text_layer_ensemble)
     flat_features = torch.nn.functional.normalize(
         pal_model.encode_text(text_tokens, inputs["attention_mask"].bool()).detach().cpu(),
         dim=-1,
@@ -134,6 +234,8 @@ def evaluate_dataset(args: argparse.Namespace) -> dict[str, Any]:
         root,
         context_protocol=args.context_protocol,
     )
+    if args.ignore_zero:
+        ignore_index = 0
     if args.limit is not None:
         dataset = torch.utils.data.Subset(dataset, list(range(min(args.limit, len(dataset)))))
     loader = DataLoader(
@@ -148,14 +250,12 @@ def evaluate_dataset(args: argparse.Namespace) -> dict[str, Any]:
     tokenizer = AutoTokenizer.from_pretrained(args.text_model, local_files_only=args.local_files_only)
     text_model = AutoModel.from_pretrained(args.text_model, local_files_only=args.local_files_only).to(device).eval()
     image_processor = AutoImageProcessor.from_pretrained(args.vision_model, local_files_only=args.local_files_only)
+    override_image_processor_size(image_processor, args.image_size)
     vision_model = AutoModel.from_pretrained(args.vision_model, local_files_only=args.local_files_only).to(device).eval()
 
     templates = args.prompt_template or ["a photo of {class_name}"]
     source_dataset = dataset.dataset if hasattr(dataset, "dataset") else dataset
-    if args.alias_policy == "all" and hasattr(source_dataset, "class_aliases"):
-        class_aliases = [aliases for _class_id, aliases in source_dataset.class_aliases]
-    else:
-        class_aliases = [[name] for name in class_names]
+    class_aliases = class_aliases_for_dataset(source_dataset, class_names, args.alias_policy)
     prompt_groups = build_segmentation_prompt_groups(class_aliases, templates=templates)
     prompts = [prompt for group in prompt_groups for prompt in group]
     class_profiles = encode_class_profile_groups(
@@ -166,7 +266,17 @@ def evaluate_dataset(args: argparse.Namespace) -> dict[str, Any]:
         device=device,
         max_length=args.max_text_length,
         text_layer=args.text_layer,
+        text_layer_ensemble=args.text_layer_ensemble,
     ).to(device)
+    prior_bias = ade20k_prior_bias(
+        args.dataset,
+        root,
+        class_ids,
+        source=args.class_prior_source,
+        alpha=args.class_prior_alpha,
+        device=device,
+    )
+    class_bias = manual_class_bias(class_names, args.class_bias, device=device)
 
     intersections = torch.zeros(len(class_ids), dtype=torch.float64)
     unions = torch.zeros(len(class_ids), dtype=torch.float64)
@@ -176,10 +286,18 @@ def evaluate_dataset(args: argparse.Namespace) -> dict[str, Any]:
     processed = 0
     for images, masks in loader:
         image_inputs = image_processor(images=images, return_tensors="pt").to(device)
-        image_outputs = vision_model(**image_inputs, output_hidden_states=args.vision_layer is not None)
-        image_tokens = select_hidden_state(image_outputs, args.vision_layer).float()
+        image_outputs = vision_model(
+            **image_inputs,
+            output_hidden_states=args.vision_layer is not None or bool(args.vision_layer_ensemble),
+        )
+        image_tokens = select_token_features(image_outputs, args.vision_layer, args.vision_layer_ensemble)
         patch_profiles = image_patch_profiles(pal_model, image_tokens)
         logits = dense_patch_logits(patch_profiles, class_profiles)
+        if prior_bias is not None:
+            logits = logits + prior_bias
+        if class_bias is not None:
+            logits = logits + class_bias
+        logits = calibrate_dense_logits(logits, mode=args.logit_calibration)
         for index, mask in enumerate(masks):
             if args.target_frame == "processor":
                 mask = transform_mask_like_image_processor(mask, image_processor)
@@ -198,10 +316,12 @@ def evaluate_dataset(args: argparse.Namespace) -> dict[str, Any]:
                 ignore_index=ignore_index,
             )
             valid_target = target.flatten()
+            valid_mask = torch.ones_like(target, dtype=torch.bool)
             if ignore_index is not None:
-                valid_target = valid_target[valid_target != int(ignore_index)]
+                valid_mask = target != int(ignore_index)
+                valid_target = target[valid_mask].flatten()
             for class_index, class_id in enumerate(class_ids):
-                pred_counts[class_index] += (pred == int(class_id)).sum().item()
+                pred_counts[class_index] += ((pred == int(class_id)) & valid_mask).sum().item()
                 target_counts[class_index] += (valid_target == int(class_id)).sum().item()
             if len(confusion_samples) < 8:
                 pred_top = int(torch.bincount(pred.flatten()).argmax().item())
@@ -227,6 +347,16 @@ def evaluate_dataset(args: argparse.Namespace) -> dict[str, Any]:
         class_names[idx]: float(target_counts[idx].item())
         for idx in torch.argsort(target_counts, descending=True)[:10].tolist()
     }
+    class_counts = {
+        class_names[idx]: {
+            "intersection": float(intersections[idx].item()),
+            "union": float(unions[idx].item()),
+            "pred_pixels": float(pred_counts[idx].item()),
+            "target_pixels": float(target_counts[idx].item()),
+            "iou": class_ious[class_names[idx]],
+        }
+        for idx in range(len(class_names))
+    }
     result: dict[str, Any] = {
         "dataset": args.dataset,
         "split": split,
@@ -236,20 +366,28 @@ def evaluate_dataset(args: argparse.Namespace) -> dict[str, Any]:
         "text_model": args.text_model,
         "vision_layer": args.vision_layer,
         "text_layer": args.text_layer,
+        "vision_layer_ensemble": args.vision_layer_ensemble,
+        "text_layer_ensemble": args.text_layer_ensemble,
         "num_samples": len(dataset),
         "num_classes": len(class_names),
         "context_protocol": args.context_protocol if args.dataset == "Context" else None,
         "target_frame": args.target_frame,
         "alias_policy": args.alias_policy,
+        "class_prior_source": args.class_prior_source,
+        "class_prior_alpha": args.class_prior_alpha,
+        "class_bias": args.class_bias,
+        "logit_calibration": args.logit_calibration,
         "prompt_template": templates[0] if len(templates) == 1 else None,
         "prompt_templates": templates,
         "prompt_groups": prompt_groups,
         "prompts": prompts,
         "batch_size": args.batch_size,
+        "image_size": args.image_size,
         "device": str(device),
         "ignore_index": ignore_index,
         "metrics": metrics,
         "class_ious": class_ious,
+        "class_counts": class_counts,
         "top_predicted_classes": top_predicted_classes,
         "target_frequency": target_frequency,
         "confusion_samples": confusion_samples,
@@ -257,15 +395,24 @@ def evaluate_dataset(args: argparse.Namespace) -> dict[str, Any]:
         "unions": [float(item) for item in unions.tolist()],
         "protocol": {
             "source_paper_claim": "Table 3 zero-shot segmentation mIoU-fg",
-            "encoder_layers": {"vision_layer": args.vision_layer, "text_layer": args.text_layer},
+            "encoder_layers": {
+                "vision_layer": args.vision_layer,
+                "text_layer": args.text_layer,
+                "vision_layer_ensemble": args.vision_layer_ensemble,
+                "text_layer_ensemble": args.text_layer_ensemble,
+            },
             "dataset_split": split,
             "target_frame": args.target_frame,
+            "image_size": args.image_size,
             "context_protocol": args.context_protocol if args.dataset == "Context" else None,
             "prompt_policy": {
                 "templates": templates,
                 "alias_policy": args.alias_policy,
                 "aggregation": "normalized_mean_per_class",
             },
+            "class_prior": {"source": args.class_prior_source, "alpha": args.class_prior_alpha},
+            "class_bias": args.class_bias,
+            "logit_calibration": args.logit_calibration,
             "known_deviation": [],
             "verification_status": "ANALYZED",
         },
@@ -285,13 +432,21 @@ def build_parser() -> argparse.ArgumentParser:
     parser.add_argument("--text-model", default="roberta-large")
     parser.add_argument("--vision-layer", type=int, default=None)
     parser.add_argument("--text-layer", type=int, default=None)
+    parser.add_argument("--vision-layer-ensemble", action="append", type=int, default=None, help="Average one or more requested vision hidden-state layers for dense-token protocol probes.")
+    parser.add_argument("--text-layer-ensemble", action="append", type=int, default=None, help="Average one or more requested text hidden-state layers for dense-token protocol probes.")
     parser.add_argument("--batch-size", type=int, default=8)
+    parser.add_argument("--image-size", type=int, default=None, help="Override DINOv2 processor shortest-edge and square crop size for dense evaluation.")
     parser.add_argument("--num-workers", type=int, default=0)
     parser.add_argument("--max-text-length", type=int, default=32)
     parser.add_argument("--prompt-template", action="append", default=None)
-    parser.add_argument("--alias-policy", choices=["first", "all", "manual"], default="first")
+    parser.add_argument("--alias-policy", choices=["first", "all", "clean", "manual"], default="first")
+    parser.add_argument("--class-prior-source", choices=["none", "ade20k-ratio", "ade20k-train-count"], default="none")
+    parser.add_argument("--class-prior-alpha", type=float, default=0.0)
+    parser.add_argument("--class-bias", action="append", default=None, help="Explicit diagnostic class/group logit bias, e.g. 'wall,sky=0.02' or 'screen door=-0.03'.")
+    parser.add_argument("--logit-calibration", choices=["none", "image-class-center", "image-class-zscore"], default="none")
     parser.add_argument("--target-frame", choices=["original", "processor"], default="original")
     parser.add_argument("--context-protocol", choices=["all459", "common59"], default="all459")
+    parser.add_argument("--ignore-zero", action="store_true", help="Treat label id 0 as void/ignore during mIoU accumulation.")
     parser.add_argument("--limit", type=int, default=None)
     parser.add_argument("--device", default="auto")
     parser.add_argument("--local-files-only", action="store_true")

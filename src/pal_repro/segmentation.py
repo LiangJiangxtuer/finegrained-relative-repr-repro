@@ -58,6 +58,95 @@ DEFAULT_SEGMENTATION_PROMPT_TEMPLATES: tuple[str, ...] = (
     "a clean photo of {class_name}",
 )
 
+ADE20K_CLEAN_ALIAS_OVERRIDES: dict[str, tuple[str, ...]] = {
+    # The ADE20K metadata is WordNet-derived and often appends broad or
+    # colloquial synsets (e.g. "person, mortal, soul" or "car, machine").
+    # Keep only aliases that are visually interchangeable class names.
+    "building": ("building", "edifice"),
+    "floor": ("floor", "flooring"),
+    "road": ("road",),
+    "windowpane": ("windowpane", "window"),
+    "sidewalk": ("sidewalk", "pavement"),
+    "person": ("person",),
+    "earth": ("earth", "ground"),
+    "door": ("door", "double door"),
+    "mountain": ("mountain",),
+    "plant": ("plant",),
+    "curtain": ("curtain", "drape", "drapery"),
+    "car": ("car", "automobile", "motorcar"),
+    "painting": ("painting", "picture"),
+    "sofa": ("sofa", "couch"),
+    "rug": ("rug", "carpet", "carpeting"),
+    "fence": ("fence", "fencing"),
+    "rock": ("rock", "stone"),
+    "wardrobe": ("wardrobe", "closet"),
+    "bathtub": ("bathtub", "bathing tub", "bath", "tub"),
+    "railing": ("railing", "rail"),
+    "base": ("base", "pedestal"),
+    "column": ("column", "pillar"),
+    "signboard": ("signboard", "sign"),
+    "chest of drawers": ("chest of drawers", "dresser"),
+    "fireplace": ("fireplace", "hearth", "open fireplace"),
+    "refrigerator": ("refrigerator", "icebox"),
+    "grandstand": ("grandstand", "covered stand"),
+    "stairs": ("stairs", "steps"),
+    "case": ("case", "display case", "showcase", "vitrine"),
+    "pool table": ("pool table", "billiard table", "snooker table"),
+    "screen door": ("screen door",),
+    "stairway": ("stairway", "staircase"),
+    "bridge": ("bridge",),
+    "blind": ("blind",),
+    "coffee table": ("coffee table", "cocktail table"),
+    "toilet": ("toilet", "commode"),
+    "stove": ("stove", "kitchen stove", "cooking stove"),
+    "palm": ("palm", "palm tree"),
+    "computer": ("computer", "electronic computer"),
+    "hovel": ("hovel", "hut", "shack", "shanty"),
+    "bus": ("bus", "motorbus"),
+    "light": ("light", "light source"),
+    "truck": ("truck", "motortruck"),
+    "chandelier": ("chandelier", "pendant"),
+    "awning": ("awning", "sunshade", "sunblind"),
+    "streetlight": ("streetlight", "street lamp"),
+    "booth": ("booth", "kiosk"),
+    "television receiver": ("television", "television set", "tv", "tv set"),
+    "airplane": ("airplane", "aeroplane", "plane"),
+    "apparel": ("apparel", "clothes"),
+    "land": ("land", "soil"),
+    "bannister": ("bannister", "banister", "handrail"),
+    "escalator": ("escalator", "moving staircase", "moving stairway"),
+    "ottoman": ("ottoman", "hassock"),
+    "buffet": ("buffet", "sideboard"),
+    "poster": ("poster", "placard"),
+    "conveyer belt": ("conveyer belt", "conveyor belt"),
+    "washer": ("washer", "automatic washer", "washing machine"),
+    "plaything": ("plaything", "toy"),
+    "swimming pool": ("swimming pool",),
+    "barrel": ("barrel", "cask"),
+    "basket": ("basket", "handbasket"),
+    "waterfall": ("waterfall", "falls"),
+    "tent": ("tent",),
+    "minibike": ("minibike", "motorbike"),
+    "food": ("food",),
+    "step": ("step", "stair"),
+    "tank": ("tank", "storage tank"),
+    "trade name": ("trade name", "brand name", "brand"),
+    "microwave": ("microwave", "microwave oven"),
+    "pot": ("pot", "flowerpot"),
+    "animal": ("animal",),
+    "bicycle": ("bicycle", "bike"),
+    "dishwasher": ("dishwasher", "dish washer", "dishwashing machine"),
+    "screen": ("screen", "projection screen"),
+    "blanket": ("blanket",),
+    "hood": ("hood", "exhaust hood"),
+    "traffic light": ("traffic light", "traffic signal", "stoplight"),
+    "ashcan": ("ashcan", "trash can", "garbage can", "wastebin", "dustbin", "trash bin"),
+    "pier": ("pier", "dock"),
+    "monitor": ("monitor",),
+    "bulletin board": ("bulletin board", "notice board"),
+    "glass": ("glass", "drinking glass"),
+}
+
 
 def normalize_segmentation_class_name(name: str) -> str:
     """Return prompt-friendly class names for dense zero-shot segmentation."""
@@ -123,6 +212,26 @@ def parse_ade20k_object_aliases(lines: Iterable[str]) -> list[tuple[int, list[st
         if aliases:
             rows.append((class_id, aliases))
     return sorted(rows, key=lambda item: item[0])
+
+
+def clean_ade20k_object_aliases(
+    class_aliases: Iterable[tuple[int, list[str]]],
+) -> list[tuple[int, list[str]]]:
+    """Return conservative ADE20K prompt aliases, avoiding broad WordNet synonyms."""
+
+    cleaned: list[tuple[int, list[str]]] = []
+    for class_id, aliases in class_aliases:
+        if not aliases:
+            continue
+        canonical = aliases[0]
+        has_override = canonical in ADE20K_CLEAN_ALIAS_OVERRIDES
+        selected = list(ADE20K_CLEAN_ALIAS_OVERRIDES.get(canonical, (canonical,)))
+        allowed = set(aliases)
+        filtered = [alias for alias in selected if alias in allowed or alias == canonical]
+        if not has_override and canonical not in filtered:
+            filtered.insert(0, canonical)
+        cleaned.append((class_id, list(dict.fromkeys(filtered))))
+    return cleaned
 
 
 class PascalContextSegmentationDataset:
@@ -296,6 +405,31 @@ def dense_patch_logits(
         raise ValueError("grid_size does not match number of patch profiles.")
     logits = F.normalize(patch_profiles, dim=-1) @ F.normalize(class_profiles, dim=-1).T
     return logits.transpose(1, 2).reshape(patch_profiles.shape[0], class_profiles.shape[0], h, w)
+
+
+def calibrate_dense_logits(
+    logits: torch.Tensor,
+    mode: str = "none",
+    eps: float = 1e-6,
+) -> torch.Tensor:
+    """Apply diagnostic dense-logit calibration before argmax decoding.
+
+    These modes are intended for protocol/debug probes, not as paper-grade
+    defaults. They operate per image and per class so they can test whether
+    class-specific logit offsets or dynamic ranges dominate dense predictions.
+    """
+
+    if mode == "none":
+        return logits
+    if logits.dim() != 4:
+        raise ValueError("logits must be shaped (B, C, H, W).")
+    if mode == "image-class-center":
+        return logits - logits.mean(dim=(2, 3), keepdim=True)
+    if mode == "image-class-zscore":
+        centered = logits - logits.mean(dim=(2, 3), keepdim=True)
+        scale = logits.std(dim=(2, 3), keepdim=True, unbiased=False).clamp_min(float(eps))
+        return centered / scale
+    raise ValueError(f"Unsupported dense logit calibration mode: {mode}")
 
 
 def patch_logits_to_label_mask(
